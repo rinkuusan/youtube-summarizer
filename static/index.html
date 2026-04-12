@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Summarizer</title>
+  <style>
+    /* ===== Reset & Base ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f0f13;
+      --surface:   #1a1a22;
+      --surface2:  #23232e;
+      --border:    #2e2e3d;
+      --accent:    #6c63ff;
+      --accent-h:  #8b84ff;
+      --text:      #e8e8f0;
+      --text-dim:  #888899;
+      --success:   #4ade80;
+      --error:     #f87171;
+      --radius:    12px;
+      --font:      'Inter', system-ui, -apple-system, sans-serif;
+    }
+
+    html { font-size: 16px; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem 4rem;
+    }
+
+    /* ===== Layout ===== */
+    .container {
+      width: 100%;
+      max-width: 780px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    /* ===== Header ===== */
+    header {
+      text-align: center;
+      padding: 1rem 0 0.5rem;
+    }
+    header h1 {
+      font-size: clamp(1.5rem, 5vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--accent) 0%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header p {
+      color: var(--text-dim);
+      margin-top: 0.4rem;
+      font-size: 0.9rem;
+    }
+
+    /* ===== Card ===== */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    /* ===== Source Tabs ===== */
+    .source-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 0.25rem;
+    }
+    .source-tab {
+      padding: 0.55rem 1.1rem;
+      font-size: 0.88rem;
+      font-weight: 500;
+      color: var(--text-dim);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .source-tab.active {
+      color: var(--accent-h);
+      border-bottom-color: var(--accent);
+    }
+
+    /* ===== URL Panel ===== */
+    #urlPanel { display: flex; flex-direction: column; gap: 0; }
+    #urlPanel input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.95rem;
+      padding: 0.7rem 1rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #urlPanel input:focus { border-color: var(--accent); }
+    #urlPanel input::placeholder { color: var(--text-dim); }
+
+    /* ===== File Panel ===== */
+    #filePanel { display: none; flex-direction: column; gap: 0.6rem; }
+    #filePanel.active { display: flex; }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 2rem 1rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      position: relative;
+    }
+    .drop-zone:hover,
+    .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(108, 99, 255, 0.06);
+    }
+    .drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+    .drop-zone-icon { font-size: 2rem; line-height: 1; margin-bottom: 0.5rem; }
+    .drop-zone-label {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+    .drop-zone-label strong { color: var(--text); }
+
+    /* File info strip */
+    #fileInfo {
+      display: none;
+      align-items: center;
+      gap: 0.6rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem 0.9rem;
+      font-size: 0.85rem;
+    }
+    #fileInfo.visible { display: flex; }
+    #fileInfo .file-icon { font-size: 1.1rem; flex-shrink: 0; }
+    #fileInfo .file-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #fileInfo .file-size { color: var(--text-dim); flex-shrink: 0; }
+    #fileInfo .file-clear {
+      background: none; border: none; color: var(--text-dim);
+      cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 0.2rem;
+      flex-shrink: 0;
+    }
+    #fileInfo .file-clear:hover { color: var(--error); }
+
+    /* ===== Options Row ===== */
+    .options-row {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .seg-group {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      flex: 1;
+      min-width: 200px;
+    }
+    .seg-group label {
+      flex: 1;
+      text-align: center;
+      cursor: pointer;
+    }
+    .seg-group label input[type="radio"] { display: none; }
+    .seg-group label span {
+      display: block;
+      padding: 0.55rem 0.75rem;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      background: var(--bg);
+      transition: background 0.15s, color 0.15s;
+      user-select: none;
+    }
+    .seg-group label:not(:last-child) span { border-right: 1px solid var(--border); }
+    .seg-group label input[type="radio"]:checked + span {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* ===== Submit Button ===== */
+    button#submitBtn {
+      width: 100%;
+      padding: 0.8rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    button#submitBtn:hover:not(:disabled) { background: var(--accent-h); }
+    button#submitBtn:active:not(:disabled) { transform: scale(0.98); }
+    button#submitBtn:disabled {
+      background: var(--surface2);
+      color: var(--text-dim);
+      cursor: not-allowed;
+    }
+
+    /* ===== Status ===== */
+    #statusBox {
+      display: none;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+    }
+    #statusBox.visible { display: block; }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.88rem;
+      color: var(--text-dim);
+    }
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #statusMsg { flex: 1; }
+
+    #progressPct {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--accent-h);
+      min-width: 2.8rem;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .progress-bar-wrap {
+      margin-top: 0.6rem;
+      height: 5px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-h));
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.35s ease;
+    }
+    /* Indeterminate pulse when progress unknown (value = -1) */
+    .progress-bar.indeterminate {
+      width: 30% !important;
+      animation: indeterminate 1.4s ease infinite;
+    }
+    @keyframes indeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(430%); }
+    }
+
+    /* ===== Result Panel ===== */
+    #resultBox {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    #resultBox.visible { display: block; }
+
+    .result-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      gap: 0.75rem;
+    }
+    .result-toolbar span {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      letter-spacing: 0.03em;
+      flex: 1;
+    }
+    .result-toolbar button {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.35rem 0.9rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: border-color 0.15s;
+      white-space: nowrap;
+    }
+    .result-toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+
+    #resultContent {
+      padding: 1.5rem;
+      max-height: 60vh;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.93rem;
+      line-height: 1.75;
+      color: var(--text);
+    }
+
+    /* ===== Error ===== */
+    #errorBox {
+      display: none;
+      background: #2a1a1a;
+      border: 1px solid #7f3030;
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      color: var(--error);
+      font-size: 0.9rem;
+    }
+    #errorBox.visible { display: block; }
+
+    /* ===== Copy feedback ===== */
+    .copy-done { color: var(--success) !important; border-color: var(--success) !important; }
+
+    /* ===== Scrollbar ===== */
+    #resultContent::-webkit-scrollbar { width: 6px; }
+    #resultContent::-webkit-scrollbar-track { background: transparent; }
+    #resultContent::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ===== Mobile/Desktop label toggle ===== */
+    .drop-mobile { display: none; }
+    .drop-desktop { display: inline; }
+
+    /* ===== Mobile ===== */
+    @media (max-width: 600px) {
+      body { padding: 1rem 0.5rem 3rem; }
+      .card { padding: 1rem; }
+      .options-row { flex-direction: column; }
+      .seg-group { min-width: 0; }
+      .seg-group label span {
+        padding: 0.7rem 0.5rem;   /* bigger touch target */
+        font-size: 0.9rem;
+      }
+      .source-tab {
+        padding: 0.7rem 0.9rem;
+        font-size: 0.9rem;
+      }
+      button#submitBtn {
+        padding: 1rem;
+        font-size: 1.05rem;
+      }
+      .drop-zone {
+        padding: 2.5rem 1rem;
+      }
+      .drop-zone-label { font-size: 1rem; }
+      .result-toolbar {
+        flex-wrap: wrap;
+        padding: 0.6rem 0.75rem;
+      }
+      .result-toolbar button {
+        padding: 0.5rem 1rem;
+        font-size: 0.88rem;
+        flex: 1;
+        text-align: center;
+      }
+      #resultContent {
+        padding: 1rem;
+        font-size: 0.88rem;
+        max-height: 55vh;
+        -webkit-overflow-scrolling: touch;
+      }
+      #urlPanel input {
+        padding: 0.8rem 1rem;
+        font-size: 1rem;
+      }
+      header h1 { font-size: 1.5rem; }
+      .drop-mobile { display: inline; }
+      .drop-desktop { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>YouTube Summarizer</h1>
+      <p>YouTube URL or audio file → transcript / summary prompt</p>
+    </header>
+
+    <!-- Input card -->
+    <div class="card">
+
+      <!-- Source tabs -->
+      <div class="source-tabs">
+        <div class="source-tab active" data-tab="url">🔗 YouTube URL</div>
+        <div class="source-tab" data-tab="file">🎵 Audio File</div>
+      </div>
+
+      <!-- URL panel -->
+      <div id="urlPanel">
+        <input
+          type="text"
+          id="urlInput"
+          placeholder="https://www.youtube.com/watch?v=..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+
+      <!-- File panel -->
+      <div id="filePanel">
+        <div class="drop-zone" id="dropZone">
+          <input type="file" id="fileInput" accept="audio/*,video/*,.mp3,.wav,.m4a,.ogg,.flac,.aac,.opus,.mp4,.webm,.mkv,.mov" />
+          <div class="drop-zone-icon">🎵</div>
+          <div class="drop-zone-label">
+            <strong class="drop-desktop">ドラッグ＆ドロップ</strong><span class="drop-desktop">、またはクリックして選択</span>
+            <strong class="drop-mobile">タップしてファイルを選択</strong><br>
+            <small style="color:var(--text-dim);font-size:0.78rem;">MP3 / WAV / M4A / FLAC / MP4 / WebM など</small>
+          </div>
+        </div>
+        <!-- Selected file info -->
+        <div id="fileInfo">
+          <span class="file-icon">🎵</span>
+          <span class="file-name" id="fileName"></span>
+          <span class="file-size" id="fileSize"></span>
+          <button class="file-clear" id="fileClearBtn" title="Remove">✕</button>
+        </div>
+      </div>
+
+      <!-- Mode + Language selectors -->
+      <div class="options-row">
+        <div class="seg-group" title="Output mode">
+          <label>
+            <input type="radio" name="mode" value="prompt" checked />
+            <span>📋 要約プロンプト</span>
+          </label>
+          <label>
+            <input type="radio" name="mode" value="transcript" />
+            <span>📝 全文整形</span>
+          </label>
+        </div>
+
+        <div class="seg-group" title="Output language">
+          <label>
+            <input type="radio" name="language" value="auto" checked />
+            <span>🌐 Auto</span>
+          </label>
+          <label>
+            <input type="radio" name="language" value="ja" />
+            <span>🇯🇵 JP</span>
+          </label>
+          <label>
+            <input type="radio" name="language" value="en" />
+            <span>🇺🇸 EN</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Engine selector -->
+      <div style="display:flex;flex-direction:column;gap:0.5rem;">
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+          <label style="font-size:0.85rem;color:var(--text-dim);white-space:nowrap;">文字起こしエンジン</label>
+          <select id="engineSelect" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.88rem;padding:0.55rem 0.75rem;outline:none;cursor:pointer;">
+            <option value="groq">⚡ Groq（クラウド・GPU不要・推奨）</option>
+            <option value="whisper">🖥️ ローカルWhisper（GPU必要・初回インストールあり）</option>
+          </select>
+        </div>
+
+        <!-- Groq key field (Groq選択時のみ表示) -->
+        <div id="groqKeyRow" style="display:flex;flex-direction:column;gap:0.4rem;">
+          <input
+            type="password"
+            id="groqKeyInput"
+            placeholder="Groq API Key (gsk_...)"
+            autocomplete="off"
+            spellcheck="false"
+            style="background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.9rem;padding:0.6rem 1rem;outline:none;"
+          />
+          <span style="font-size:0.75rem;color:var(--text-dim);">キーはブラウザにのみ保存されます（サーバーには保存されません）</span>
+        </div>
+
+        <!-- Whisper warning (Whisper選択時のみ表示) -->
+        <div id="whisperWarning" style="display:none;font-size:0.8rem;color:#f5a623;background:#2a2010;border:1px solid #6a4a10;border-radius:8px;padding:0.55rem 0.9rem;">
+          ⚠️ 初回実行時にfaster-whisperを自動インストールします（数分かかる場合あり）。CUDA(GPU)が必要です。
+        </div>
+      </div>
+
+      <button id="submitBtn">Generate</button>
+    </div>
+
+    <!-- Status -->
+    <div id="statusBox">
+      <div class="status-line">
+        <div class="spinner"></div>
+        <span id="statusMsg">Starting...</span>
+        <span id="progressPct"></span>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar indeterminate" id="progressBar"></div>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="errorBox"></div>
+
+    <!-- Result -->
+    <div id="resultBox">
+      <div class="result-toolbar">
+        <span id="resultLabel">Result</span>
+        <button id="copyBtn">Copy All</button>
+      </div>
+      <div id="resultContent"></div>
+    </div>
+  </div>
+
+  <script>
+    // ===== Element refs =====
+    const urlInput      = document.getElementById('urlInput');
+    const submitBtn     = document.getElementById('submitBtn');
+    const statusBox     = document.getElementById('statusBox');
+    const statusMsg     = document.getElementById('statusMsg');
+    const progressBar   = document.getElementById('progressBar');
+    const progressPct   = document.getElementById('progressPct');
+    const errorBox      = document.getElementById('errorBox');
+    const resultBox     = document.getElementById('resultBox');
+    const resultContent = document.getElementById('resultContent');
+    const resultLabel   = document.getElementById('resultLabel');
+    const copyBtn       = document.getElementById('copyBtn');
+    const dropZone      = document.getElementById('dropZone');
+    const fileInput     = document.getElementById('fileInput');
+    const fileInfo      = document.getElementById('fileInfo');
+    const fileName      = document.getElementById('fileName');
+    const fileSize      = document.getElementById('fileSize');
+    const fileClearBtn  = document.getElementById('fileClearBtn');
+    const urlPanel      = document.getElementById('urlPanel');
+    const filePanel     = document.getElementById('filePanel');
+    const sourceTabs    = document.querySelectorAll('.source-tab');
+    const groqKeyInput   = document.getElementById('groqKeyInput');
+    const engineSelect   = document.getElementById('engineSelect');
+    const groqKeyRow     = document.getElementById('groqKeyRow');
+    const whisperWarning = document.getElementById('whisperWarning');
+
+    let currentRawText = '';
+    let selectedFile   = null;
+    let activeTab      = 'url';   // 'url' | 'file'
+
+    // Restore settings from localStorage
+    groqKeyInput.value  = localStorage.getItem('groq_api_key') || '';
+    engineSelect.value  = localStorage.getItem('stt_engine') || 'groq';
+    updateEngineUI();
+
+    groqKeyInput.addEventListener('input', () => {
+      localStorage.setItem('groq_api_key', groqKeyInput.value.trim());
+    });
+    engineSelect.addEventListener('change', () => {
+      localStorage.setItem('stt_engine', engineSelect.value);
+      updateEngineUI();
+    });
+
+    function updateEngineUI() {
+      const isGroq = engineSelect.value === 'groq';
+      groqKeyRow.style.display     = isGroq ? '' : 'none';
+      whisperWarning.style.display = isGroq ? 'none' : '';
+    }
+
+    // ===== Helpers =====
+    function getMode()     { return document.querySelector('input[name="mode"]:checked').value; }
+    function getLanguage() { return document.querySelector('input[name="language"]:checked').value; }
+
+    function fmtSize(bytes) {
+      if (bytes < 1024)       return bytes + ' B';
+      if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    // ===== Tab switching =====
+    sourceTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        activeTab = tab.dataset.tab;
+        sourceTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === activeTab));
+        urlPanel.style.display  = activeTab === 'url'  ? '' : 'none';
+        filePanel.classList.toggle('active', activeTab === 'file');
+      });
+    });
+
+    // ===== Drag & Drop =====
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const f = e.dataTransfer.files[0];
+      if (f) setSelectedFile(f);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) setSelectedFile(fileInput.files[0]);
+    });
+
+    function setSelectedFile(f) {
+      selectedFile = f;
+      fileName.textContent = f.name;
+      fileSize.textContent = fmtSize(f.size);
+      fileInfo.classList.add('visible');
+    }
+
+    fileClearBtn.addEventListener('click', () => {
+      selectedFile = null;
+      fileInput.value = '';
+      fileInfo.classList.remove('visible');
+    });
+
+    // ===== Status / Result / Error =====
+    function setProgress(value) {
+      if (value < 0) {
+        // indeterminate
+        progressBar.classList.add('indeterminate');
+        progressBar.style.width = '';
+        progressPct.textContent = '';
+      } else {
+        progressBar.classList.remove('indeterminate');
+        progressBar.style.width = value + '%';
+        progressPct.textContent = value + '%';
+      }
+    }
+
+    function setStatus(msg) { statusMsg.textContent = msg; }
+
+    function showStatus(msg) {
+      statusBox.classList.add('visible');
+      errorBox.classList.remove('visible');
+      resultBox.classList.remove('visible');
+      setProgress(-1);   // start indeterminate
+      setStatus(msg);
+    }
+
+    function showError(msg) {
+      statusBox.classList.remove('visible');
+      errorBox.classList.add('visible');
+      errorBox.textContent = '⚠️ ' + msg;
+    }
+
+    function showResult(text, mode) {
+      statusBox.classList.remove('visible');
+      resultBox.classList.add('visible');
+      currentRawText = text;
+
+      const charCount = text.length.toLocaleString();
+      if (mode === 'prompt') {
+        resultLabel.textContent = `要約プロンプト (${charCount} chars) — コピーしてClaudeチャットへ貼り付け`;
+      } else {
+        resultLabel.textContent = `全文整形 (${charCount} chars)`;
+      }
+      resultContent.textContent = text;
+    }
+
+    // ===== Copy =====
+    copyBtn.addEventListener('click', async () => {
+      if (!currentRawText) return;
+      try {
+        await navigator.clipboard.writeText(currentRawText);
+        copyBtn.textContent = 'Copied!';
+        copyBtn.classList.add('copy-done');
+        setTimeout(() => { copyBtn.textContent = 'Copy All'; copyBtn.classList.remove('copy-done'); }, 2000);
+      } catch {
+        copyBtn.textContent = 'Failed';
+        setTimeout(() => { copyBtn.textContent = 'Copy All'; }, 2000);
+      }
+    });
+
+    // ===== SSE reader (shared) =====
+    async function readSSE(response, mode) {
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\
+');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (!payload) continue;
+          let ev;
+          try { ev = JSON.parse(payload); } catch { continue; }
+
+          if      (ev.type === 'status')   setStatus(ev.message);
+          else if (ev.type === 'progress') setProgress(ev.value);
+          else if (ev.type === 'result')   showResult(ev.text, mode);
+          else if (ev.type === 'error')    showError(ev.message);
+        }
+      }
+    }
+
+    // ===== Submit =====
+    submitBtn.addEventListener('click', startProcess);
+    urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') startProcess(); });
+
+    async function startProcess() {
+      const mode        = getMode();
+      const language    = getLanguage();
+      const engine      = engineSelect.value;
+      const groqApiKey  = groqKeyInput.value.trim();
+      submitBtn.disabled = true;
+
+      try {
+        if (activeTab === 'url') {
+          // ---- YouTube URL mode ----
+          const url = urlInput.value.trim();
+          if (!url) { urlInput.focus(); return; }
+          showStatus('Connecting...');
+
+          const res = await fetch('/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, mode, language, engine, groq_api_key: groqApiKey }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: 'Server error' }));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+          }
+          await readSSE(res, mode);
+
+        } else {
+          // ---- Audio file mode ----
+          if (!selectedFile) {
+            showError('ファイルを選択してください。');
+            return;
+          }
+          showStatus(`Uploading ${selectedFile.name}...`);
+
+          const fd = new FormData();
+          fd.append('file', selectedFile);
+          fd.append('mode', mode);
+          fd.append('language', language);
+          fd.append('engine', engine);
+          fd.append('groq_api_key', groqApiKey);
+
+          const res = await fetch('/process-file', {
+            method: 'POST',
+            body: fd,
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: 'Server error' }));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+          }
+          await readSSE(res, mode);
+        }
+      } catch (err) {
+        showError(err.message || 'Unknown error occurred.');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
