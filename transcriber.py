@@ -1,7 +1,8 @@
 """
-Transcript extraction pipeline (cloud edition — no local GPU):
+Transcript extraction pipeline (cloud edition):
 1. youtube-transcript-api (fast, free)
-2. yt-dlp audio download → Groq Whisper API (cloud STT)
+2. Supadata API fallback (handles captionless videos via AI transcription)
+3. yt-dlp + Groq Whisper (last resort, may be blocked on cloud IPs)
 """
 
 import json
@@ -9,10 +10,15 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import logging
 from typing import Optional, Callable
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+SUPADATA_API_URL = "https://api.supadata.ai/v1/youtube/transcript"
 
 
 # ─────────────────────────────────────────────
@@ -41,7 +47,7 @@ def get_preferred_languages(language: str) -> list[str]:
 
 
 # ─────────────────────────────────────────────
-# YouTube captions
+# YouTube captions (free, no API key)
 # ─────────────────────────────────────────────
 
 def fetch_youtube_captions(video_id: str, language: str) -> Optional[str]:
@@ -108,7 +114,101 @@ def fetch_youtube_captions(video_id: str, language: str) -> Optional[str]:
 
 
 # ─────────────────────────────────────────────
-# yt-dlp audio download
+# Supadata API (handles captionless videos)
+# ─────────────────────────────────────────────
+
+def fetch_supadata_transcript(
+    video_id: str,
+    language: str,
+    groq_api_key: str,
+    status_callback=None,
+    progress_callback=None,
+) -> Optional[str]:
+    """Fetch transcript via Supadata API with auto mode (AI fallback for captionless videos)."""
+
+    # Use Groq API key as Supadata key if it starts with expected prefix,
+    # otherwise check for SUPADATA_API_KEY env var
+    supadata_key = os.environ.get("SUPADATA_API_KEY", "")
+    if not supadata_key:
+        logger.info("No SUPADATA_API_KEY set, skipping Supadata fallback")
+        return None
+
+    def status(msg):
+        logger.info(msg)
+        if status_callback:
+            status_callback(msg)
+
+    def prog(v):
+        if progress_callback:
+            progress_callback(v)
+
+    lang_param = None if language == "auto" else language
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    status("Supadata APIで文字起こし中（字幕なし動画対応）...")
+    prog(20)
+
+    try:
+        params = {"url": url, "text": "true", "mode": "auto"}
+        if lang_param:
+            params["lang"] = lang_param
+
+        headers = {"x-api-key": supadata_key}
+
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(SUPADATA_API_URL, params=params, headers=headers)
+
+        if resp.status_code == 202:
+            # Async job — poll for result
+            job = resp.json()
+            job_id = job.get("jobId", "")
+            if not job_id:
+                logger.warning("Supadata returned 202 but no jobId")
+                return None
+
+            status("Supadata: AI文字起こし処理中（長い動画は時間がかかります）...")
+            poll_url = f"{SUPADATA_API_URL}/{job_id}"
+            for attempt in range(120):  # max ~4 min
+                time.sleep(2)
+                prog(20 + min(60, attempt))
+                with httpx.Client(timeout=15) as client:
+                    poll_resp = client.get(poll_url, headers=headers)
+                if poll_resp.status_code == 200:
+                    data = poll_resp.json()
+                    content = data.get("content", "")
+                    if content:
+                        logger.info(f"Supadata async job complete: {len(content)} chars")
+                        return content
+                    return None
+                elif poll_resp.status_code == 202:
+                    continue  # still processing
+                else:
+                    logger.warning(f"Supadata poll error: {poll_resp.status_code}")
+                    return None
+
+            logger.warning("Supadata job timed out")
+            return None
+
+        elif resp.status_code == 200:
+            data = resp.json()
+            content = data.get("content", "")
+            if content:
+                logger.info(f"Supadata immediate result: {len(content)} chars")
+                prog(85)
+                return content
+            return None
+
+        else:
+            logger.warning(f"Supadata error: {resp.status_code} {resp.text[:200]}")
+            return None
+
+    except Exception as e:
+        logger.warning(f"Supadata API failed: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────
+# yt-dlp audio download (may fail on cloud IPs)
 # ─────────────────────────────────────────────
 
 def download_audio_yt_dlp(video_id: str, output_dir: str) -> str:
@@ -231,23 +331,36 @@ def get_transcript(
 
     video_id = extract_video_id(url)
 
+    # ── Step 1: Try youtube-transcript-api (free, fast) ──
     prog(5)
-    status("Fetching captions...")
+    status("字幕を取得中...")
     caption_text = fetch_youtube_captions(video_id, language)
 
     if caption_text:
         prog(85)
-        status("Captions found.")
+        status("字幕を取得しました。")
         return {"text": caption_text, "method": "captions", "video_id": video_id}
 
-    # No captions — need Groq API key for audio transcription
+    # ── Step 2: Try Supadata API (handles captionless videos) ──
+    prog(10)
+    status("字幕なし。Supadata APIで文字起こしを試行中...")
+    supadata_text = fetch_supadata_transcript(
+        video_id, language, groq_api_key, status_callback, progress_callback
+    )
+
+    if supadata_text:
+        prog(85)
+        status("Supadata APIで文字起こし完了。")
+        return {"text": supadata_text, "method": "supadata", "video_id": video_id}
+
+    # ── Step 3: Try yt-dlp + Groq (may fail on cloud) ──
     if not groq_api_key:
         raise ValueError(
             "この動画には字幕がありません。音声文字起こしにはGroq APIキーが必要です。"
         )
 
     prog(15)
-    status("No captions found. Extracting audio...")
+    status("音声をダウンロード中...")
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = download_audio_yt_dlp(video_id, tmpdir)
@@ -266,8 +379,9 @@ def get_transcript(
         err_msg = str(e)
         if "Sign in" in err_msg or "bot" in err_msg or "cookies" in err_msg:
             raise ValueError(
-                "この動画には字幕がなく、YouTubeがクラウドサーバーからの音声取得をブロックしています。\n"
-                "字幕（CC）が有効な動画を試してください。"
+                "この動画には字幕がなく、YouTubeが音声取得をブロックしています。\n"
+                "Supadata APIキーを設定するか、字幕付き動画を試してください。\n"
+                "（Renderダッシュボードで環境変数 SUPADATA_API_KEY を設定）"
             ) from e
         raise
 
