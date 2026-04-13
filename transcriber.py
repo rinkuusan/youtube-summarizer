@@ -248,19 +248,28 @@ def get_transcript(
 
     prog(15)
     status("No captions found. Extracting audio...")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        audio_path = download_audio_yt_dlp(video_id, tmpdir)
-        prog(20)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = download_audio_yt_dlp(video_id, tmpdir)
+            prog(20)
 
-        def scaled(p: int):
-            prog(20 + int(p * 0.65))
+            def scaled(p: int):
+                prog(20 + int(p * 0.65))
 
-        status("Groq Whisper APIで文字起こし中...")
-        transcript_text = transcribe_with_groq(
-            audio_path, language, groq_api_key, status_callback, scaled
-        )
-        if not transcript_text.strip():
-            raise ValueError("Transcription returned empty result.")
+            status("Groq Whisper APIで文字起こし中...")
+            transcript_text = transcribe_with_groq(
+                audio_path, language, groq_api_key, status_callback, scaled
+            )
+            if not transcript_text.strip():
+                raise ValueError("Transcription returned empty result.")
+    except Exception as e:
+        err_msg = str(e)
+        if "Sign in" in err_msg or "bot" in err_msg or "cookies" in err_msg:
+            raise ValueError(
+                "この動画には字幕がなく、YouTubeがクラウドサーバーからの音声取得をブロックしています。\n"
+                "字幕（CC）が有効な動画を試してください。"
+            ) from e
+        raise
 
     prog(87)
     return {"text": transcript_text, "method": "groq", "video_id": video_id}
