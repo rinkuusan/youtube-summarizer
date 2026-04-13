@@ -2,7 +2,12 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="description" content="YouTube動画の文字起こし・要約をワンクリックで" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='20' width='100' height='100' fill='%237c6cff'/><polygon points='38,25 78,50 38,75' fill='white'/></svg>" />
   <title>YouTube Summarizer</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -413,6 +418,77 @@
       opacity: 1;
     }
 
+    /* ===== Thumbnail Preview ===== */
+    #thumbnail {
+      display: none;
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+    }
+    #thumbnail.visible { display: block; }
+    #thumbnail img {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      border-radius: 10px;
+      opacity: 0.7;
+    }
+    #thumbnail .thumb-title {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 2rem 0.75rem 0.6rem;
+      background: linear-gradient(transparent, rgba(0,0,0,0.85));
+      font-size: 0.8rem;
+      color: #fff;
+      border-radius: 0 0 10px 10px;
+    }
+
+    /* ===== Wake-up overlay ===== */
+    #wakeOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 1000;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+    }
+    #wakeOverlay.visible { display: flex; }
+    #wakeOverlay .wake-spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    #wakeOverlay p {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      text-align: center;
+      max-width: 280px;
+    }
+
+    /* ===== Button loading state ===== */
+    button#submitBtn.loading {
+      position: relative;
+      color: transparent;
+    }
+    button#submitBtn.loading::after {
+      content: '';
+      position: absolute;
+      width: 20px; height: 20px;
+      top: 50%; left: 50%;
+      margin: -10px 0 0 -10px;
+      border: 2.5px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
     /* ===== Footer ===== */
     footer {
       text-align: center;
@@ -468,6 +544,7 @@
 
       <div id="urlPanel">
         <input type="text" id="urlInput" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" spellcheck="false" />
+        <div id="thumbnail"><img id="thumbImg" src="" alt="" /><div class="thumb-title" id="thumbTitle"></div></div>
       </div>
 
       <div id="filePanel">
@@ -532,6 +609,7 @@
   </div>
 
   <div class="toast" id="toast">Copied!</div>
+  <div id="wakeOverlay"><div class="wake-spinner"></div><p>サーバーを起動中...<br><small style="opacity:0.6">無料プランのため初回アクセスに時間がかかります</small></p></div>
 
   <script>
     const urlInput      = document.getElementById('urlInput');
@@ -556,15 +634,58 @@
     const sourceTabs    = document.querySelectorAll('.source-tab');
     const groqKeyInput  = document.getElementById('groqKeyInput');
     const toast         = document.getElementById('toast');
+    const thumbnail     = document.getElementById('thumbnail');
+    const thumbImg      = document.getElementById('thumbImg');
+    const thumbTitle    = document.getElementById('thumbTitle');
+    const wakeOverlay   = document.getElementById('wakeOverlay');
 
     let currentRawText = '';
     let selectedFile   = null;
     let activeTab      = 'url';
 
+    // ===== Server wake-up check =====
+    (async function checkServer() {
+      try {
+        const r = await fetch('/health', { signal: AbortSignal.timeout(5000) });
+        if (r.ok) return; // server is awake
+      } catch {}
+      // Server sleeping - show overlay and poll
+      wakeOverlay.classList.add('visible');
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const r = await fetch('/health', { signal: AbortSignal.timeout(5000) });
+          if (r.ok) { wakeOverlay.classList.remove('visible'); return; }
+        } catch {}
+      }
+      wakeOverlay.classList.remove('visible');
+    })();
+
     // Restore
     groqKeyInput.value = localStorage.getItem('groq_api_key') || '';
     groqKeyInput.addEventListener('input', () => {
       localStorage.setItem('groq_api_key', groqKeyInput.value.trim());
+    });
+
+    // ===== Thumbnail preview =====
+    function extractVideoId(url) {
+      const m = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
+      return m ? m[1] : null;
+    }
+    let thumbDebounce = null;
+    urlInput.addEventListener('input', () => {
+      clearTimeout(thumbDebounce);
+      thumbDebounce = setTimeout(() => {
+        const vid = extractVideoId(urlInput.value.trim());
+        if (vid) {
+          thumbImg.src = 'https://img.youtube.com/vi/' + vid + '/mqdefault.jpg';
+          thumbImg.onerror = () => thumbnail.classList.remove('visible');
+          thumbnail.classList.add('visible');
+          thumbTitle.textContent = '';
+        } else {
+          thumbnail.classList.remove('visible');
+        }
+      }, 300);
     });
 
     // Helpers
@@ -713,6 +834,7 @@
     async function startProcess() {
       const mode = getMode(), language = getLanguage(), groqApiKey = groqKeyInput.value.trim();
       submitBtn.disabled = true;
+      submitBtn.classList.add('loading');
       try {
         if (activeTab === 'url') {
           const url = urlInput.value.trim();
@@ -739,6 +861,7 @@
         showError(err.message || 'Unknown error');
       } finally {
         submitBtn.disabled = false;
+        submitBtn.classList.remove('loading');
       }
     }
   </script>
