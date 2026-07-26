@@ -1,7 +1,9 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -13,6 +15,8 @@ import {
 
 import { computeMomentum, formatMomentum } from '@/api/momentum';
 import { fetchThreadList, type ThreadSummary } from '@/api/subject';
+import * as threadRepo from '@/db/threadRepo';
+import type { ThreadListItem } from '@/db/types';
 import { toDisplayMessage } from '@/net/errors';
 import { colors, radius, spacing } from '@/theme/colors';
 import { normalizeForSearch } from '@/utils/normalize';
@@ -27,12 +31,45 @@ const SORTS: { key: SortKey; label: string }[] = [
 ];
 
 export default function ThreadListScreen() {
+  const db = useSQLiteContext();
   const { host, board, name } = useLocalSearchParams<{ host: string; board: string; name?: string }>();
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [sort, setSort] = useState<SortKey>('momentum');
   const [query, setQuery] = useState('');
+  /** 既読・お気に入りの状態。スレ一覧に新着バッジを出すのに使う。 */
+  const [known, setKnown] = useState<Map<string, ThreadListItem>>(new Map());
+
+  const loadKnown = useCallback(async () => {
+    const [opened, favs] = await Promise.all([
+      threadRepo.listOpenedHistory(db, 1000),
+      threadRepo.listFavorites(db),
+    ]);
+    const map = new Map<string, ThreadListItem>();
+    for (const t of [...opened, ...favs]) {
+      if (t.host === host && t.board === board) map.set(t.key, t);
+    }
+    setKnown(map);
+  }, [db, host, board]);
+
+  // スレを読んで戻ってきたら既読状態を反映する
+  useFocusEffect(
+    useCallback(() => {
+      loadKnown();
+    }, [loadKnown])
+  );
+
+  const toggleFavorite = useCallback(
+    async (t: ThreadSummary) => {
+      const ref = { host, board, key: t.key };
+      const isFav = known.get(t.key)?.favorite ?? false;
+      await threadRepo.setFavorite(db, ref, !isFav, t.title);
+      await loadKnown();
+      Alert.alert(t.title, isFav ? 'お気に入りから外しました' : 'お気に入りに追加しました');
+    },
+    [db, host, board, known, loadKnown]
+  );
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -128,27 +165,36 @@ export default function ThreadListScreen() {
               <Text style={styles.dim}>該当するスレッドがありません</Text>
             </View>
           }
-          renderItem={({ item, index }) => (
-            <Pressable
-              style={styles.row}
-              onPress={() =>
-                router.push({
-                  pathname: '/thread/[host]/[board]/[key]',
-                  params: { host, board, key: item.key, title: item.title },
-                })
-              }>
-              <Text style={styles.index}>{index + 1}</Text>
-              <View style={styles.rowBody}>
-                <Text style={styles.title} numberOfLines={2}>
-                  {item.title}
-                </Text>
-                <View style={styles.metaRow}>
-                  <Text style={styles.res}>{item.resCount}レス</Text>
-                  <Text style={styles.momentum}>勢い {formatMomentum(computeMomentum(item.key, item.resCount))}</Text>
+          renderItem={({ item, index }) => {
+            const state = known.get(item.key);
+            const unread = state ? Math.max(0, item.resCount - state.readCount) : 0;
+            return (
+              <Pressable
+                style={styles.row}
+                onPress={() =>
+                  router.push({
+                    pathname: '/thread/[host]/[board]/[key]',
+                    params: { host, board, key: item.key, title: item.title },
+                  })
+                }
+                onLongPress={() => toggleFavorite(item)}>
+                <Text style={styles.index}>{index + 1}</Text>
+                <View style={styles.rowBody}>
+                  <Text style={[styles.title, state && styles.titleRead]} numberOfLines={2}>
+                    {item.title}
+                  </Text>
+                  <View style={styles.metaRow}>
+                    <Text style={styles.res}>{item.resCount}レス</Text>
+                    <Text style={styles.momentum}>
+                      勢い {formatMomentum(computeMomentum(item.key, item.resCount))}
+                    </Text>
+                    {state && unread > 0 ? <Text style={styles.unread}>新着 {unread}</Text> : null}
+                    {state?.favorite ? <Text style={styles.fav}>★</Text> : null}
+                  </View>
                 </View>
-              </View>
-            </Pressable>
-          )}
+              </Pressable>
+            );
+          }}
         />
       )}
     </View>
@@ -206,7 +252,11 @@ const styles = StyleSheet.create({
   index: { color: colors.textDim, fontSize: 12, minWidth: 24, fontVariant: ['tabular-nums'] },
   rowBody: { flex: 1, gap: spacing.xs },
   title: { color: colors.text, fontSize: 15, lineHeight: 21 },
-  metaRow: { flexDirection: 'row', gap: spacing.md },
+  /** 一度開いたスレは少し落とす。未読との区別が付くように。 */
+  titleRead: { color: colors.textDim },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   res: { color: colors.textDim, fontSize: 11 },
   momentum: { color: colors.accentHover, fontSize: 11 },
+  unread: { color: colors.success, fontSize: 11, fontWeight: '700' },
+  fav: { color: colors.accent, fontSize: 11 },
 });

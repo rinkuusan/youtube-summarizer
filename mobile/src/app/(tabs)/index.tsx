@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   SectionList,
   StyleSheet,
@@ -11,27 +13,58 @@ import {
 } from 'react-native';
 
 import { fetchBoards, groupByCategory, type Board } from '@/api/bbsmenu';
+import * as boardRepo from '@/db/boardRepo';
 import { toDisplayMessage } from '@/net/errors';
 import { colors, radius, spacing } from '@/theme/colors';
 import { normalizeForSearch } from '@/utils/normalize';
 
 export default function BoardListScreen() {
+  const db = useSQLiteContext();
   const [boards, setBoards] = useState<Board[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const load = useCallback(() => {
-    const ac = new AbortController();
-    setError(null);
-    setBoards(null);
-    fetchBoards(ac.signal)
-      .then(setBoards)
-      .catch((e) => setError(toDisplayMessage(e)));
-    return () => ac.abort();
-  }, []);
+  /**
+   * bbsmenu.json は 180KB あるので毎回は取りに行かない。
+   * キャッシュがあれば先に出し、古ければ裏で取り直す。圏外でも板一覧は出る。
+   */
+  const load = useCallback(
+    async (force = false) => {
+      setError(null);
+      try {
+        const cached = await boardRepo.loadAll(db);
+        if (cached.length > 0) setBoards(cached);
+        else setBoards(null);
 
-  useEffect(() => load(), [load]);
+        if (force || cached.length === 0 || !(await boardRepo.isFresh(db))) {
+          const fresh = await fetchBoards();
+          await boardRepo.saveAll(db, fresh);
+          setBoards(fresh);
+        }
+      } catch (e) {
+        // キャッシュが出せているならエラーで潰さない
+        setBoards((prev) => {
+          if (!prev || prev.length === 0) setError(toDisplayMessage(e));
+          return prev;
+        });
+      }
+    },
+    [db]
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const toggleFavoriteBoard = useCallback(
+    async (b: Board) => {
+      const isFav = await boardRepo.isFavoriteBoard(db, b.host, b.id);
+      await boardRepo.setFavoriteBoard(db, b.host, b.id, !isFav);
+      Alert.alert(b.name, isFav ? 'お気に入りから外しました' : 'お気に入りに追加しました');
+    },
+    [db]
+  );
 
   const sections = useMemo(() => {
     if (!boards) return [];
@@ -60,7 +93,7 @@ export default function BoardListScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>{error}</Text>
-        <Pressable style={styles.retry} onPress={load}>
+        <Pressable style={styles.retry} onPress={() => load(true)}>
           <Text style={styles.retryText}>再試行</Text>
         </Pressable>
       </View>
@@ -111,7 +144,8 @@ export default function BoardListScreen() {
                 pathname: '/board/[host]/[board]',
                 params: { host: item.host, board: item.id, name: item.name },
               })
-            }>
+            }
+            onLongPress={() => toggleFavoriteBoard(item)}>
             <Text style={styles.boardName}>{item.name}</Text>
             <Text style={styles.boardId}>{item.id}</Text>
           </Pressable>

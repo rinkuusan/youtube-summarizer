@@ -34,8 +34,9 @@ npx eas build -p android --profile preview
 
 ## テスト
 
-パーサは実機なしで検証できる。実際の 5ch から取得した dat を
-`src/parse/__fixtures__/sample.dat.b64` に固定してあるので、オフラインで走る。
+実機もネットワークも使わずに検証できるようにしてある。実際の 5ch から取得した dat と
+検索結果 HTML をフィクスチャに固定してあり、DB は Node 22 の `node:sqlite` で
+本物の SQLite に対して走らせている。
 
 ```bash
 npm test          # jest
@@ -49,16 +50,28 @@ src/
   net/      通信と Shift_JIS
     http.ts       expo/fetch のラッパ。バイト列で受け取る
     sjis.ts       Shift_JIS の復号・符号化・行境界の切り出し
+    cookieJar.ts  投稿用の自前 Cookie 管理
     errors.ts     エラーの日本語化
   parse/    純関数のパーサ (テスト対象)
     datLine.ts    dat 1 行 -> Post
     body.ts       本文 -> 描画用トークン列
+    findHtml.ts   find.5ch の検索結果
     entities.ts   HTML 実体参照
   api/      5ch のエンドポイント
     bbsmenu.ts    板一覧
     subject.ts    スレ一覧
     dat.ts        レス取得 (Range による差分取得)
+    search.ts     スレタイ検索
+    post.ts       bbs.cgi への書き込み
+    postErrors.ts 応答の分類 (データ駆動)
+    setting.ts    SETTING.TXT
     momentum.ts   勢い
+  db/       expo-sqlite
+    migrations.ts PRAGMA user_version の梯子
+    threadRepo.ts 既読・お気に入り・履歴
+    postRepo.ts   レスのキャッシュ
+  filter/
+    applyNg.ts    描画時の NG 判定 (連鎖対応)
   components/
   app/      expo-router のルート
 ```
@@ -89,12 +102,31 @@ LF の直後でだけ切っている限り、Range のバイト境界で多バ�
 **エンティティの復号はタグ抽出より後。** 先に復号すると、本文中に書かれた
 `&lt;a&gt;` が本物のタグに化ける。
 
+## 履歴は 2 種類
+
+「開いたスレ」と「書き込んだスレ」を分けて自動で記録する。手で登録する操作は無い。
+
+テーブルは分けず、`thread` に 2 本のタイムスタンプ列を置いている
+(`last_opened_at` / `last_posted_at`)。スレは 1 つの実体で、お気に入りも既読も
+履歴もその属性にすぎないため。
+
+- 閲覧履歴 ... スレビューの mount で `threadRepo.touchOpened()`
+- 書き込み履歴 ... 投稿成功時に `threadRepo.markPosted()`
+
+刈り込みは非対称にしてある。**閲覧履歴は 500 件で打ち切るが、書き込み履歴は刈らない。**
+自分が書いたスレは価値が高く、件数もたかが知れているので。
+
 ## 現状
 
-読む側は動く。板一覧 -> スレ一覧 (勢い順) -> レス表示、アンカーのポップアップ
-(多段で辿れる)、逆参照、画像・URL のリンク化、Range による差分取得まで。
+閲覧・既読・お気に入り・履歴・検索・NG・書き込みまで一通り実装済み。
 
-未実装: お気に入りと既読管理 (SQLite)、NG、検索、書き込み。
+- スレを開くとキャッシュから即描画し、そのあと Range で差分だけ取る。
+  **圏外でも取得済みのレスは読める**
+- 未読の先頭に「ここまで読んだ」区切りを挟んで、その位置に復元する
+- NG はワード / ID / 名前 / ワッチョイ、正規表現と連鎖に対応。描画時に適用するので
+  切り替えに再取得が要らない
+- 書き込みは下書きの自動保存、連投規制の先読み、確認画面の表示、
+  「ブラウザで書き込む」の逃げ道つき
 
 ## 注意
 
