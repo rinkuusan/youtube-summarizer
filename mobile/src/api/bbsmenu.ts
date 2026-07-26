@@ -1,5 +1,6 @@
 import { Ch5Error, errorFromStatus } from '../net/errors';
 import { fetchBytes, hostOf } from '../net/http';
+import { log } from '../net/log';
 
 /**
  * 板一覧。bbsmenu.json は UTF-8 で、各要素が板キー (directory_name) と
@@ -98,5 +99,7 @@ export async function fetchBoards(signal?: AbortSignal): Promise<Board[]> {
   } catch (e) {
     throw new Ch5Error('parse', '板一覧の JSON を解析できませんでした。', { url: BBSMENU_URL, cause: e });
   }
-  return parseBbsmenu(json);
+  const boards = parseBbsmenu(json);
+  log('info', 'bbsmenu', `板 ${boards.length} 件 (${res.bytes.length}B)`);
+  return boards;
 }

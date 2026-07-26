@@ -1,5 +1,6 @@
 import { errorFromStatus } from '../net/errors';
 import { fetchBytes } from '../net/http';
+import { log } from '../net/log';
 import { decodeSjis } from '../net/sjis';
 import { decodeEntities } from '../parse/entities';
 
@@ -50,5 +51,8 @@ export async function fetchThreadList(
   // subject.txt は差分取得しないので全体をデコードする。
   // 末尾に LF が無い場合に最終行を落とさないため、行境界の切り捨てはしない。
   const lines = decodeSjis(res.bytes).split('\n');
-  return parseSubject(lines);
+  const threads = parseSubject(lines);
+  // 行数とスレ数が大きくずれていたら subject.txt の書式が変わったサイン。
+  log('info', 'subject', `${host}/${board}: ${threads.length} スレ / ${lines.length} 行`);
+  return threads;
 }

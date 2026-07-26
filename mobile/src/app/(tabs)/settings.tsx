@@ -92,6 +92,14 @@ export default function SettingsScreen() {
         <Text style={styles.linkValue}>{ngCount}件 ›</Text>
       </Pressable>
 
+      <Text style={styles.sectionTitle}>診断</Text>
+
+      {/* release APK には Metro も adb も無いので、ここが不具合を追う唯一の経路になる。 */}
+      <Pressable style={styles.linkRow} onPress={() => router.push('/logs')}>
+        <Text style={styles.label}>ログを見る</Text>
+        <Text style={styles.linkValue}>通信・エラー・クラッシュ ›</Text>
+      </Pressable>
+
       <Text style={styles.sectionTitle}>データ</Text>
 
       <Pressable

@@ -4,6 +4,8 @@
  * 方針: エラーを握りつぶさない。生 dat の直読みは 5ch の裁量でいつでも塞がれうるので、
  * 塞がれたときに「何が起きたか」がユーザーに見えることを優先する。
  */
+import { logError } from './log';
+
 export type Ch5ErrorKind =
   | 'network' // 回線・DNS・タイムアウト
   | 'notFound' // 404 (板/スレが無い、dat 落ち)
@@ -57,8 +59,14 @@ export function errorFromThrown(e: unknown, url: string): Ch5Error {
   return new Ch5Error('network', `5ch に接続できません: ${msg}`, { url, cause: e });
 }
 
-/** 画面にそのまま出せる一行メッセージ。 */
+/**
+ * 画面にそのまま出せる一行メッセージ。
+ *
+ * 画面に出るエラーは必ずここを通るので、ログ記録もここでまとめて行う。
+ * 各画面の catch に個別に仕込むと、画面を足したときに漏れる。
+ */
 export function toDisplayMessage(e: unknown): string {
+  logError('ui', e, '画面にエラー表示');
   if (e instanceof Ch5Error) return e.message;
   return e instanceof Error ? e.message : String(e);
 }

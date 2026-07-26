@@ -5,6 +5,7 @@
 import { fetch } from 'expo/fetch';
 
 import { Ch5Error, errorFromThrown } from './errors';
+import { log, logError } from './log';
 
 /** 読み取りは専ブラの慣例に従って名乗る。5ch 側でも受理されることを実測で確認済み。 */
 export const READ_UA = 'Monazilla/1.00 (GochViewer/0.1)';
@@ -61,9 +62,14 @@ export async function fetchBytes(url: string, opts: FetchBytesOptions = {}): Pro
   const onExternalAbort = () => controller.abort();
   opts.signal?.addEventListener('abort', onExternalAbort);
 
+  const method = opts.method ?? 'GET';
+  const startedAt = Date.now();
+  // 5ch 側で塞がれたときに「何を投げて何が返ったか」を後から追えるようにする。
+  log('info', 'http', `→ ${method} ${url}`, opts.headers ? JSON.stringify(opts.headers) : undefined);
+
   try {
     const res = await fetch(url, {
-      method: opts.method ?? 'GET',
+      method,
       headers: { 'User-Agent': READ_UA, ...opts.headers },
       body: opts.body,
       redirect: 'follow',
@@ -73,6 +79,14 @@ export async function fetchBytes(url: string, opts: FetchBytesOptions = {}): Pro
 
     // 304 / 416 は本文が無い。bytes() は空配列を返す。
     const bytes = await res.bytes();
+    const ms = Date.now() - startedAt;
+
+    log(
+      res.status >= 400 ? 'warn' : 'info',
+      'http',
+      `← ${res.status} ${bytes.length}B ${ms}ms ${url}`,
+      res.redirected ? `redirected→ ${res.url}` : undefined
+    );
 
     return {
       status: res.status,
@@ -82,7 +96,9 @@ export async function fetchBytes(url: string, opts: FetchBytesOptions = {}): Pro
       redirected: res.redirected,
     };
   } catch (e) {
-    throw errorFromThrown(e, url);
+    const wrapped = errorFromThrown(e, url);
+    logError('http', wrapped, `✗ ${method} ${url} (${Date.now() - startedAt}ms)`);
+    throw wrapped;
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onExternalAbort);
