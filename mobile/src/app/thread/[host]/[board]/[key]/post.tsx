@@ -106,7 +106,15 @@ export default function PostFormScreen() {
       setSending(true);
       setError(null);
       try {
-        const r = await submitPost(db, threadRef, { name, mail, message }, { accepted });
+        // 承諾時は、いま表示している確認ページのフォームをそのまま送り返す。
+        // feature のような使い捨てトークンが入っており、これが無いと
+        // 5ch は承諾と認めず確認ページを返し続ける。
+        const r = await submitPost(
+          db,
+          threadRef,
+          { name, mail, message },
+          { accepted, confirmFields: accepted ? result?.formFields : undefined }
+        );
         setResult(r);
 
         if (r.outcome === 'success') {
@@ -125,7 +133,9 @@ export default function PostFormScreen() {
         setSending(false);
       }
     },
-    [db, threadRef, name, mail, message]
+    // result は承諾時に確認ページのフォームを送り返すのに要る。
+    // 依存に入れないと古い確認ページのトークンを送ってしまう。
+    [db, threadRef, name, mail, message, result]
   );
 
   const openInBrowser = useCallback(() => {

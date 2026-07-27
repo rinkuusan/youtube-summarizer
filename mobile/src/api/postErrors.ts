@@ -101,6 +101,39 @@ export interface PostResult {
   bodyText: string;
   /** 元の HTML。切り分け用に保持する。 */
   html: string;
+  /**
+   * 応答のフォームに入っていた hidden 等の値。承諾して送り直すときに
+   * そのまま積み直す。確認ページは `feature` のような使い捨てトークンを
+   * 要求してくるので、これを返さないと何度承諾しても確認ページが返り続ける
+   * (実測 2026-07-28: kizuna.5ch.io/gamefight は feature,submit の 2 つ)。
+   */
+  formFields: Record<string, string>;
+}
+
+/**
+ * 応答のフォームから name/value を集める。
+ *
+ * 属性の順は 5ch の実装依存なので、name と value の前後どちらでも拾えるようにする。
+ * value が無い input (チェックボックス等) は空文字で持つ。
+ */
+export function extractFormFields(html: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of html.matchAll(/<input\b([^>]*)>/gi)) {
+    const attrs = m[1];
+    const name = /\bname\s*=\s*"([^"]*)"/i.exec(attrs)?.[1];
+    if (!name) continue;
+    out[name] = decodeAttr(/\bvalue\s*=\s*"([^"]*)"/i.exec(attrs)?.[1] ?? '');
+  }
+  return out;
+}
+
+function decodeAttr(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
 
 /** <title> を取り出す。 */
@@ -132,6 +165,7 @@ export function extractText(html: string): string {
 export function classifyPostResponse(html: string, httpStatus = 200): PostResult {
   const title = extractTitle(html);
   const bodyText = extractText(html);
+  const formFields = extractFormFields(html);
   const haystackTitle = title;
   const haystackAll = `${title}\n${bodyText}`;
 
@@ -142,6 +176,7 @@ export function classifyPostResponse(html: string, httpStatus = 200): PostResult
       message: `サーバに拒否されました (${httpStatus})。ブラウザから書き込んでみてください。`,
       action: 'openBrowser',
       bodyText,
+      formFields,
       html,
     };
   }
@@ -149,6 +184,7 @@ export function classifyPostResponse(html: string, httpStatus = 200): PostResult
   const build = ({ patterns: _patterns, ...rest }: Rule): PostResult => ({
     ...rest,
     bodyText,
+    formFields,
     html,
   });
 
@@ -165,6 +201,7 @@ export function classifyPostResponse(html: string, httpStatus = 200): PostResult
     title: title || '書き込みに失敗しました',
     message: '5ch からの応答を判別できませんでした。以下がそのままの内容です。',
     bodyText,
+    formFields,
     html,
   };
 }

@@ -5,6 +5,7 @@ import type { ThreadRef } from '../db/types';
 import * as cookieJar from '../net/cookieJar';
 import { fetchBytes, getHeaders } from '../net/http';
 import { buildSjisForm, decodeSjis } from '../net/sjis';
+import { log } from '../net/log';
 import { classifyPostResponse, type PostResult } from './postErrors';
 
 /**
@@ -40,6 +41,16 @@ export interface PostDraft {
 export interface PostOptions {
   /** 書き込み確認ページを承諾して再送する。ユーザーの明示的な操作を経てのみ true にする。 */
   accepted?: boolean;
+  /**
+   * 確認ページのフォームに入っていた値。承諾時にそのまま積み直す。
+   *
+   * これを送り返さないと、何度承諾しても確認ページが返り続ける。
+   * 実測 (2026-07-28、kizuna.5ch.io/gamefight): 確認ページのフォームは
+   * feature と submit の 2 つだけを持ち、こちらが組み立てた submit 文字列を
+   * 送っても 5ch は承諾と認めない。使い捨てトークンである feature を
+   * 返すことが条件になっている。
+   */
+  confirmFields?: Record<string, string>;
 }
 
 function bbsCgiUrl(host: string): string {
@@ -95,8 +106,14 @@ export async function submitPost(
     FROM: draft.name,
     mail: draft.mail,
     MESSAGE: draft.message,
-    submit: opts.accepted ? '上記全てを承諾して書き込む' : '書き込む',
+    submit: '書き込む',
   };
+
+  // 承諾して送り直すときは、確認ページのフォームの値を上書きで積む。
+  // submit の文字列もページ側のものを使う (こちらで文字列を推測しない)。
+  if (opts.accepted && opts.confirmFields) {
+    Object.assign(fields, opts.confirmFields);
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
@@ -121,7 +138,45 @@ export async function submitPost(
   await cookieJar.store(db, ref.host, getHeaders(res.headers, 'set-cookie'));
 
   const html = decodeSjis(res.bytes);
-  return classifyPostResponse(html, res.status);
+  const result = classifyPostResponse(html, res.status);
+  logPostExchange(cookie, getHeaders(res.headers, 'set-cookie'), html, result, opts);
+  return result;
+}
+
+/**
+ * 書き込みの往復を記録する。
+ *
+ * 「書き込み確認が何度押しても返ってくる」のが最も多い詰まり方で、原因は
+ * Cookie が保存/送信できていないか、確認フォームが要求する隠しフィールドを
+ * 送り返せていないかのどちらか。画面には 5ch の文面しか出ないため、
+ * どちらなのかを切り分けられる情報をここで残す。
+ *
+ * Cookie の値は認証情報そのものなので出さない。名前と長さだけにする。
+ */
+function logPostExchange(
+  sentCookie: string | null,
+  setCookie: string[],
+  html: string,
+  result: PostResult,
+  opts: PostOptions
+): void {
+  const names = (c: string) => c.split(/;\s*/).map((p) => p.split('=')[0]).filter(Boolean);
+  const sent = sentCookie ? names(sentCookie) : [];
+  const got = setCookie.map((line) => line.split('=')[0].trim());
+  // 確認ページが要求してくるフィールド。こちらが送っているものと突き合わせる。
+  const inputs = [...html.matchAll(/<input[^>]*\bname="([^"]+)"/gi)].map((m) => m[1]);
+  const title = /<title>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() ?? '(title なし)';
+
+  log(
+    'info',
+    'post',
+    `結果=${result.outcome} 承諾送信=${opts.accepted ? 'あり' : 'なし'} title=${title}`,
+    [
+      `送信Cookie: ${sent.length ? sent.join(',') : '(なし)'}`,
+      `受信Set-Cookie: ${got.length ? got.join(',') : '(なし)'}`,
+      `応答フォームの入力欄: ${inputs.length ? [...new Set(inputs)].join(',') : '(なし)'}`,
+    ].join(' | ')
+  );
 }
 
 // --- 下書き ---

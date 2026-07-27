@@ -1,4 +1,4 @@
-import { classifyPostResponse, extractCooldownSeconds, extractText } from '../postErrors';
+import { extractFormFields, classifyPostResponse, extractCooldownSeconds, extractText } from '../postErrors';
 
 /** bbs.cgi の応答は常に HTTP 200 で、成否は <title> に出る。 */
 function page(title: string, body = ''): string {
@@ -69,5 +69,38 @@ describe('postErrors', () => {
     expect(extractText('<p>あ</p><p>い</p>')).toBe('あ\nい');
     expect(extractText('a<br>b')).toBe('a\nb');
     expect(extractText('<script>var x=1</script>本文')).toBe('本文');
+  });
+});
+
+describe('extractFormFields', () => {
+  // 確認ページは feature のような使い捨てトークンを返させる。これを送り返さないと
+  // 何度承諾しても確認ページが返り続ける (実測 2026-07-28 kizuna.5ch.io/gamefight)。
+  const confirm = `<html><head><title>■ 書き込み確認 ■</title></head><body>
+    <form method="POST" action="../test/bbs.cgi">
+    <input type="hidden" name="feature" value="a1b2&amp;c3">
+    <input type="submit" name="submit" value="上記全てを承諾して書き込む">
+    </form></body></html>`;
+
+  it('name/value を集め、エンティティを戻す', () => {
+    expect(extractFormFields(confirm)).toEqual({
+      feature: 'a1b2&c3',
+      submit: '上記全てを承諾して書き込む',
+    });
+  });
+
+  it('属性の順が逆でも拾う', () => {
+    expect(extractFormFields('<input value="x" name="feature">')).toEqual({ feature: 'x' });
+  });
+
+  it('name の無い input は無視する', () => {
+    expect(extractFormFields('<input type="text"><input name="a" value="1">')).toEqual({ a: '1' });
+  });
+
+  it('分類結果に formFields が乗る', () => {
+    const r = classifyPostResponse(confirm);
+    expect(r.outcome).toBe('confirm');
+    expect(r.formFields.feature).toBe('a1b2&c3');
+    // submit 文字列はこちらで推測せず、ページのものを使う
+    expect(r.formFields.submit).toBe('上記全てを承諾して書き込む');
   });
 });
