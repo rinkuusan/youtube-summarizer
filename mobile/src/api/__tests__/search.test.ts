@@ -51,3 +51,25 @@ describe('filterByTitle', () => {
     expect(filterByTitle(hits, '   ')).toHaveLength(3);
   });
 });
+
+describe('2 重エスケープの復元', () => {
+  // find.5ch は dat 側の文字参照 (&#128563;) を更に HTML エスケープして
+  // &amp;#128563; として吐く。1 回しか剥がさないと画面に生の &#128563; が出る。
+  const hits = parseFindHtml(
+    readFileSync(join(__dirname, '..', '..', 'parse', '__fixtures__', 'find-escaped.html'), 'utf8')
+  );
+
+  it('文字参照が実体に戻り、生の &# が残らない', () => {
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].title).toContain('\u{1F633}');
+    for (const h of hits) {
+      expect(h.title).not.toContain('&#');
+      expect(h.title).not.toContain('&amp;');
+    }
+  });
+
+  it('レス数の切り出しは 2 重デコード後も効く', () => {
+    expect(hits[0].resCount).toBe(3);
+    expect(hits[0].title).not.toMatch(/\(3\)$/);
+  });
+});

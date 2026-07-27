@@ -29,6 +29,11 @@ function emit() {
 }
 
 export function log(level: LogLevel, tag: string, msg: string, detail?: unknown): void {
+  // logcat にも流す。端末が施錠されていて画面を見られない状況でも
+  // adb logcat -s ReactNativeJS で追えるようにするため。
+  // console.log は下のフックで捕まえていないので二重記録にはならない。
+  console.log(`[gv][${level}] ${tag}: ${msg}`);
+
   entries = [
     ...entries.slice(entries.length >= MAX_ENTRIES ? entries.length - MAX_ENTRIES + 1 : 0),
     { id: ++seq, at: Date.now(), level, tag, msg, detail: stringifyDetail(detail) },

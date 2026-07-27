@@ -53,8 +53,21 @@ export function errorFromStatus(status: number, url: string): Ch5Error {
 export function errorFromThrown(e: unknown, url: string): Ch5Error {
   if (e instanceof Ch5Error) return e;
   const msg = e instanceof Error ? e.message : String(e);
-  if (/abort/i.test(msg)) {
-    return new Ch5Error('network', '通信がタイムアウトしました。', { url, cause: e });
+  if (/abort|cancel/i.test(msg)) {
+    // 「応答が一切返らないまま時間切れ」の典型的な原因が、端末の IPv6 経路が
+    // 死んでいるケース。IPv6 が使えると広告されているのに実際には通らない回線で
+    // 起きる (実測 2026-07-27: この端末は ping6 が 100% ロス、IPv6 が諦めるまで 107 秒)。
+    // アプリの HTTP 実装は IPv4 と IPv6 を競争させないので、死んだ IPv6 を掴んだまま
+    // 返ってこない。curl だけ平気なのは競争させるため。アプリ側では回避できないので、
+    // 何が起きているかを名指しして、直せる場所をユーザーに伝える。
+    return new Ch5Error(
+      'network',
+      '5ch から応答がありません。\n' +
+        '端末の IPv6 が繋がらない状態だと、こうなります。' +
+        'VPN を切る / Wi-Fi とモバイル通信を切り替える / 機内モードを一往復させる、' +
+        'のどれかで直ることが多いです。',
+      { url, cause: e }
+    );
   }
   return new Ch5Error('network', `5ch に接続できません: ${msg}`, { url, cause: e });
 }

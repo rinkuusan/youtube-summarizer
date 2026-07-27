@@ -50,8 +50,16 @@ const UPDATED = /class="list_line_info_container"[^>]*>([\s\S]*?)<\/div>/;
 // タイトル末尾の (レス数)。subject.txt と同じで、貪欲な .* が最後の括弧に一致する。
 const TITLE_RES = /^([\s\S]*)\s+\((\d+)\)\s*$/;
 
+/**
+ * タグを剥がし、エンティティを 2 回デコードする。
+ *
+ * find.5ch のテキストはエスケープが 2 層になっている。dat のスレタイは元から
+ * `&#9825;` (♡) のような文字参照を含んでおり、find.5ch はそれを更に HTML
+ * エスケープして `&amp;#9825;` として吐く。1 回しか剥がさないと画面に
+ * 「ざ～こ&#9825;」と生の文字参照が出て、板一覧やスレ画面とも表示が食い違う。
+ */
 function stripTags(s: string): string {
-  return decodeEntities(s.replace(/<[^>]*>/g, '')).trim();
+  return decodeEntities(decodeEntities(s.replace(/<[^>]*>/g, ''))).trim();
 }
 
 export function parseFindHtml(html: string): SearchHit[] {
