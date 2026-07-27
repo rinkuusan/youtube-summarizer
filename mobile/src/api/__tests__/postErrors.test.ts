@@ -1,4 +1,4 @@
-import { extractFormFields, classifyPostResponse, extractCooldownSeconds, extractText } from '../postErrors';
+import { extractFormAction, extractFormFields, classifyPostResponse, extractCooldownSeconds, extractText } from '../postErrors';
 
 /** bbs.cgi の応答は常に HTTP 200 で、成否は <title> に出る。 */
 function page(title: string, body = ''): string {
@@ -102,5 +102,40 @@ describe('extractFormFields', () => {
     expect(r.formFields.feature).toBe('a1b2&c3');
     // submit 文字列はこちらで推測せず、ページのものを使う
     expect(r.formFields.submit).toBe('上記全てを承諾して書き込む');
+  });
+});
+
+describe('確認ページの実物の書き方', () => {
+  // 5ch はクォート有無を混在させる。name= が裸なので、二重引用符だけを見ていると
+  // FROM/mail/MESSAGE を丸ごと取りこぼす (実測 2026-07-28)。
+  const real =
+    '<html><head><title>■ 書き込み確認 ■</title></head><body>' +
+    '<form method=POST action="../test/bbs.cgi?guid=ON">' +
+    '<input type=hidden name=FROM value="">' +
+    '<input type=hidden name=mail value="sage">' +
+    '<input type=hidden name=MESSAGE value="本文">' +
+    '<input type=hidden name=bbs value=gamefight>' +
+    '<input type=submit value="上記全てを承諾して書き込む" name=submit>' +
+    '</form></body></html>';
+
+  it('クォート無しの name/value も拾う', () => {
+    expect(extractFormFields(real)).toEqual({
+      FROM: '',
+      mail: 'sage',
+      MESSAGE: '本文',
+      bbs: 'gamefight',
+      submit: '上記全てを承諾して書き込む',
+    });
+  });
+
+  it('送信先をクエリごと取る', () => {
+    expect(extractFormAction(real)).toBe('../test/bbs.cgi?guid=ON');
+  });
+
+  it('分類結果に両方乗る', () => {
+    const r = classifyPostResponse(real);
+    expect(r.outcome).toBe('confirm');
+    expect(r.formAction).toContain('guid=ON');
+    expect(r.formFields.MESSAGE).toBe('本文');
   });
 });

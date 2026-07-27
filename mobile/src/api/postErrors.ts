@@ -108,23 +108,46 @@ export interface PostResult {
    * (実測 2026-07-28: kizuna.5ch.io/gamefight は feature,submit の 2 つ)。
    */
   formFields: Record<string, string>;
+  /** 応答フォームの送信先 (相対のことがある)。承諾時はここへ送り直す。 */
+  formAction: string | null;
+}
+
+/**
+ * 属性値を取り出す。5ch の確認ページは同じタグの中でクォートの有無が混在する。
+ * 実物: `<input type=hidden name=FROM value="">` (name は裸、value は二重引用符)
+ * 裸の値だけを見ていると FROM/mail/MESSAGE を丸ごと取りこぼす。
+ */
+function attr(attrs: string, key: string): string | null {
+  const re = new RegExp(`\\b${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i');
+  const m = re.exec(attrs);
+  if (!m) return null;
+  return m[1] ?? m[2] ?? m[3] ?? '';
 }
 
 /**
  * 応答のフォームから name/value を集める。
- *
- * 属性の順は 5ch の実装依存なので、name と value の前後どちらでも拾えるようにする。
- * value が無い input (チェックボックス等) は空文字で持つ。
+ * value が無い input は空文字で持つ。
  */
 export function extractFormFields(html: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const m of html.matchAll(/<input\b([^>]*)>/gi)) {
-    const attrs = m[1];
-    const name = /\bname\s*=\s*"([^"]*)"/i.exec(attrs)?.[1];
+    const name = attr(m[1], 'name');
     if (!name) continue;
-    out[name] = decodeAttr(/\bvalue\s*=\s*"([^"]*)"/i.exec(attrs)?.[1] ?? '');
+    out[name] = decodeAttr(attr(m[1], 'value') ?? '');
   }
   return out;
+}
+
+/**
+ * 応答のフォームの送信先。
+ *
+ * 確認ページは `../test/bbs.cgi?guid=ON` を指しており、クエリ付きでないと
+ * 5ch は承諾と認めない。こちらが素の bbs.cgi に投げ続けると確認ページが
+ * 返り続ける (実測 2026-07-28)。
+ */
+export function extractFormAction(html: string): string | null {
+  const m = /<form\b([^>]*)>/i.exec(html);
+  return m ? attr(m[1], 'action') : null;
 }
 
 function decodeAttr(s: string): string {
@@ -166,6 +189,7 @@ export function classifyPostResponse(html: string, httpStatus = 200): PostResult
   const title = extractTitle(html);
   const bodyText = extractText(html);
   const formFields = extractFormFields(html);
+  const formAction = extractFormAction(html);
   const haystackTitle = title;
   const haystackAll = `${title}\n${bodyText}`;
 
@@ -177,6 +201,7 @@ export function classifyPostResponse(html: string, httpStatus = 200): PostResult
       action: 'openBrowser',
       bodyText,
       formFields,
+      formAction,
       html,
     };
   }
@@ -185,6 +210,7 @@ export function classifyPostResponse(html: string, httpStatus = 200): PostResult
     ...rest,
     bodyText,
     formFields,
+    formAction,
     html,
   });
 
@@ -202,6 +228,7 @@ export function classifyPostResponse(html: string, httpStatus = 200): PostResult
     message: '5ch からの応答を判別できませんでした。以下がそのままの内容です。',
     bodyText,
     formFields,
+    formAction,
     html,
   };
 }

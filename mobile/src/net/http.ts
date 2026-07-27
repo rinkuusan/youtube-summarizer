@@ -105,6 +105,36 @@ export async function fetchBytes(url: string, opts: FetchBytesOptions = {}): Pro
   }
 }
 
+/**
+ * 相対 URL を基準 URL に対して解決する。
+ *
+ * RN の URL 実装は相対解決に対応していないので自前で持つ。
+ * 5ch の書き込み確認ページが `../test/bbs.cgi?guid=ON` を返すため、
+ * クエリを落とさずに絶対 URL へ直す必要がある。
+ */
+export function resolveUrl(base: string, href: string): string {
+  if (/^https?:\/\//i.test(href)) return href;
+
+  const m = /^(https?:\/\/[^/]+)(\/[^?#]*)?/i.exec(base);
+  if (!m) return href;
+  const origin = m[1];
+
+  if (href.startsWith('//')) return `https:${href}`;
+  if (href.startsWith('/')) return origin + href;
+
+  // 基準のディレクトリ部分 (最後の / まで) を起点にする。
+  const dir = (m[2] ?? '/').replace(/[^/]*$/, '');
+  const segments = (dir + href).split('/');
+  const out: string[] = [];
+  for (const seg of segments) {
+    if (seg === '.' || seg === '') continue;
+    if (seg === '..') out.pop();
+    else out.push(seg);
+  }
+  // 末尾のクエリは最後のセグメントに含まれたまま残る。
+  return `${origin}/${out.join('/')}`;
+}
+
 /** URL からホスト名を取り出す。bbsmenu の url から板サーバを割り出すのに使う。 */
 export function hostOf(url: string): string {
   const m = /^https?:\/\/([^/]+)/i.exec(url);

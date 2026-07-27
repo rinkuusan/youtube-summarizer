@@ -113,7 +113,11 @@ export default function PostFormScreen() {
           db,
           threadRef,
           { name, mail, message },
-          { accepted, confirmFields: accepted ? result?.formFields : undefined }
+          {
+            accepted,
+            confirmFields: accepted ? result?.formFields : undefined,
+            confirmAction: accepted ? result?.formAction : undefined,
+          }
         );
         setResult(r);
 

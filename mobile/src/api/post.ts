@@ -3,7 +3,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import * as kvRepo from '../db/kvRepo';
 import type { ThreadRef } from '../db/types';
 import * as cookieJar from '../net/cookieJar';
-import { fetchBytes, getHeaders } from '../net/http';
+import { fetchBytes, getHeaders, resolveUrl } from '../net/http';
 import { buildSjisForm, decodeSjis } from '../net/sjis';
 import { log } from '../net/log';
 import { classifyPostResponse, type PostResult } from './postErrors';
@@ -51,6 +51,12 @@ export interface PostOptions {
    * 返すことが条件になっている。
    */
   confirmFields?: Record<string, string>;
+  /**
+   * 確認ページのフォームの送信先。相対のことがある。
+   * 実測 (2026-07-28) では `../test/bbs.cgi?guid=ON` で、この `?guid=ON` が無いと
+   * 5ch は承諾と認めず確認ページを返し続ける。
+   */
+  confirmAction?: string | null;
 }
 
 function bbsCgiUrl(host: string): string {
@@ -96,7 +102,11 @@ export async function submitPost(
   draft: PostDraft,
   opts: PostOptions = {}
 ): Promise<PostResult> {
-  const url = bbsCgiUrl(ref.host);
+  const base = bbsCgiUrl(ref.host);
+  // 承諾時は確認ページが指す宛先へ送る。素の bbs.cgi に投げ直すと
+  // ?guid=ON が落ちて、何度承諾しても確認ページが返ってくる。
+  const url =
+    opts.accepted && opts.confirmAction ? resolveUrl(base, opts.confirmAction) : base;
 
   const fields: Record<string, string> = {
     bbs: ref.board,
@@ -139,7 +149,7 @@ export async function submitPost(
 
   const html = decodeSjis(res.bytes);
   const result = classifyPostResponse(html, res.status);
-  logPostExchange(cookie, getHeaders(res.headers, 'set-cookie'), html, result, opts);
+  logPostExchange(url, fields, cookie, getHeaders(res.headers, 'set-cookie'), html, result, opts);
   return result;
 }
 
@@ -154,6 +164,8 @@ export async function submitPost(
  * Cookie の値は認証情報そのものなので出さない。名前と長さだけにする。
  */
 function logPostExchange(
+  url: string,
+  sentFields: Record<string, string>,
   sentCookie: string | null,
   setCookie: string[],
   html: string,
@@ -163,19 +175,24 @@ function logPostExchange(
   const names = (c: string) => c.split(/;\s*/).map((p) => p.split('=')[0]).filter(Boolean);
   const sent = sentCookie ? names(sentCookie) : [];
   const got = setCookie.map((line) => line.split('=')[0].trim());
-  // 確認ページが要求してくるフィールド。こちらが送っているものと突き合わせる。
-  const inputs = [...html.matchAll(/<input[^>]*\bname="([^"]+)"/gi)].map((m) => m[1]);
   const title = /<title>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() ?? '(title なし)';
 
+  // 応答フォームの送信先。同意の宛先が bbs.cgi とは限らないので必ず見る。
+  const actions = [...html.matchAll(/<form\b[^>]*\baction\s*=\s*"([^"]*)"/gi)].map((m) => m[1]);
+  const inputs = [...html.matchAll(/<input\b[^>]*>/gi)].map((m) => m[0]);
+
+  // logcat にも載るよう、切り分けに要る情報は msg 側に置く。
   log(
     'info',
     'post',
-    `結果=${result.outcome} 承諾送信=${opts.accepted ? 'あり' : 'なし'} title=${title}`,
-    [
-      `送信Cookie: ${sent.length ? sent.join(',') : '(なし)'}`,
-      `受信Set-Cookie: ${got.length ? got.join(',') : '(なし)'}`,
-      `応答フォームの入力欄: ${inputs.length ? [...new Set(inputs)].join(',') : '(なし)'}`,
-    ].join(' | ')
+    `結果=${result.outcome} 承諾=${opts.accepted ? 'あり' : 'なし'} title=${title}` +
+      ` | 送信フィールド=${Object.keys(sentFields).join(',')}` +
+      ` | 送信先=${url}` +
+      ` | 応答form action=${actions.length ? actions.join(' , ') : '(なし)'}` +
+      ` | 応答input=${inputs.join(' ')}` +
+      ` | 送信Cookie=${sent.length ? sent.join(',') : 'なし'}` +
+      ` | 受信Set-Cookie=${got.length ? got.join(',') : 'なし'}`,
+    html
   );
 }
 
