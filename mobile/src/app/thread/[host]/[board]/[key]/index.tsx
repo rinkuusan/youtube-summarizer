@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 
+import { fetchArchivedThread } from '@/api/archived';
 import { emptyCursor, fetchDat, type DatCursor } from '@/api/dat';
 import { bodyMatchesMine, takePendingMine } from '@/api/post';
 import { PostItem } from '@/components/PostItem';
@@ -22,7 +23,8 @@ import * as postRepo from '@/db/postRepo';
 import * as threadRepo from '@/db/threadRepo';
 import type { NgRule, ThreadRef } from '@/db/types';
 import { applyNg } from '@/filter/applyNg';
-import { toDisplayMessage } from '@/net/errors';
+import { Ch5Error, toDisplayMessage } from '@/net/errors';
+import { logError } from '@/net/log';
 import { anchorTargets, parseBody, type Segment } from '@/parse/body';
 import { parseDatLine, type Post } from '@/parse/datLine';
 import { DEFAULT_SETTINGS, SETTINGS_KEY, type AppSettings } from '@/settings';
@@ -128,6 +130,23 @@ export default function ThreadScreen() {
 
         await markMyPosts(nextPosts);
       } catch (e) {
+        // dat 落ち (404) なら read.cgi から拾い直す。板から落ちただけで
+        // 中身はしばらく読めるので、ここで諦めると検索結果の大半が開けなくなる。
+        if (e instanceof Ch5Error && e.kind === 'notFound') {
+          try {
+            const archived = await fetchArchivedThread(host, board, key);
+            if (archived.posts.length > 0) {
+              await postRepo.save(db, threadRef, archived.posts);
+              setPosts(archived.posts);
+              if (archived.title) setThreadTitle(archived.title);
+              setStatus(`${archived.posts.length}レス (dat 落ち: 過去ログから取得)`);
+              await markMyPosts(archived.posts);
+              return;
+            }
+          } catch (fallbackError) {
+            logError('archived', fallbackError, '過去ログの取得も失敗');
+          }
+        }
         setError(toDisplayMessage(e));
       } finally {
         setLoading(false);
