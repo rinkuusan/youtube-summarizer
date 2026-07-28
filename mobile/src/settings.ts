@@ -10,6 +10,13 @@ export interface AppSettings {
   defaultSage: boolean;
   /** 投稿時の既定の名前。 */
   defaultName: string;
+  /**
+   * 画像をぼかす条件。
+   * 'sensitive' = 本文やスレタイに「グロ注意」等の警告があるものだけ (既定)
+   * 'always'    = 全部ぼかす。警告を書かずに貼られる分も受けたいとき
+   * 'never'     = ぼかさない
+   */
+  blurImages: 'sensitive' | 'always' | 'never';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -17,6 +24,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontSize: 15,
   defaultSage: true,
   defaultName: '',
+  blurImages: 'sensitive',
 };
 
 /**

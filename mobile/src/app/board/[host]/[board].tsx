@@ -27,7 +27,7 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'momentum', label: '勢い' },
   { key: 'new', label: '新着' },
   { key: 'res', label: 'レス数' },
-  { key: 'created', label: 'スレ立て' },
+  { key: 'created', label: '新スレ順' },
 ];
 
 export default function ThreadListScreen() {
@@ -117,7 +117,23 @@ export default function ThreadListScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: name ?? board }} />
+      <Stack.Screen
+        options={{
+          title: name ?? board,
+          headerRight: () => (
+            <Pressable
+              hitSlop={12}
+              onPress={() =>
+                router.push({
+                  pathname: '/newthread',
+                  params: { host, board, name: name ?? board },
+                })
+              }>
+              <Text style={styles.newThread}>＋ スレ立て</Text>
+            </Pressable>
+          ),
+        }}
+      />
 
       <View style={styles.toolbar}>
         <View style={styles.sortRow}>
@@ -202,6 +218,7 @@ export default function ThreadListScreen() {
 }
 
 const styles = StyleSheet.create({
+  newThread: { color: colors.accentHover, fontSize: 13, fontWeight: '700' },
   container: { flex: 1, backgroundColor: colors.bg },
   center: { padding: spacing.xl, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   dim: { color: colors.textDim, fontSize: 13 },

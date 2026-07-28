@@ -85,6 +85,40 @@ export default function SettingsScreen() {
         />
       </View>
 
+      <Text style={styles.sectionTitle}>画像</Text>
+
+      <View style={styles.row}>
+        <View style={styles.rowBody}>
+          <Text style={styles.label}>ぼかし</Text>
+        </View>
+        <View style={styles.stepper}>
+          {(
+            [
+              { key: 'sensitive', label: '警告つき' },
+              { key: 'always', label: '全部' },
+              { key: 'never', label: 'しない' },
+            ] as const
+          ).map((o) => (
+            <Pressable
+              key={o.key}
+              onPress={() => update({ blurImages: o.key })}
+              style={[styles.sizeChip, settings.blurImages === o.key && styles.sizeChipActive]}>
+              <Text
+                style={[
+                  styles.sizeText,
+                  settings.blurImages === o.key && styles.sizeTextActive,
+                ]}>
+                {o.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <Text style={styles.blurHint}>
+        「警告つき」は本文やスレタイに「グロ注意」「閲覧注意」等が書かれている画像だけぼかす。
+        画像の中身は見ていないので、警告なしで貼られた分は素通しになる。全部ぼかす方が確実。
+      </Text>
+
       <Text style={styles.sectionTitle}>NG</Text>
 
       <Pressable style={styles.linkRow} onPress={() => router.push('/settings/ng')}>
@@ -165,6 +199,7 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, gap: 2 },
   label: { color: colors.text, fontSize: 15 },
   hint: { color: colors.textDim, fontSize: 11 },
+  blurHint: { color: colors.textDim, fontSize: 11, lineHeight: 17, paddingHorizontal: 16, paddingVertical: 8 },
   linkValue: { color: colors.textDim, fontSize: 13 },
   stepper: { flexDirection: 'row', gap: spacing.xs },
   sizeChip: {

@@ -25,7 +25,11 @@ import type { NgRule, ThreadRef } from '@/db/types';
 import { applyNg } from '@/filter/applyNg';
 import { Ch5Error, toDisplayMessage } from '@/net/errors';
 import { logError } from '@/net/log';
-import { anchorTargets, parseBody, type Segment } from '@/parse/body';
+import { Image } from 'expo-image';
+
+import { ImageViewer } from '@/components/ImageViewer';
+import { looksSensitive } from '@/filter/sensitive';
+import { anchorTargets, parseBody, segmentsToPlainText, type Segment } from '@/parse/body';
 import { parseDatLine, type Post } from '@/parse/datLine';
 import { DEFAULT_SETTINGS, SETTINGS_KEY, type AppSettings } from '@/settings';
 import { colors, radius, spacing } from '@/theme/colors';
@@ -48,6 +52,8 @@ export default function ThreadScreen() {
     board: string;
     key: string;
     title?: string;
+    /** 履歴から「自分のレス」へ飛ぶときのレス番号。 */
+    focusRes?: string;
   }>();
   const { host, board, key } = params;
   const threadRef = useMemo<ThreadRef>(() => ({ host, board, key }), [host, board, key]);
@@ -64,6 +70,10 @@ export default function ThreadScreen() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   /** 開いた時点の既読数。区切り線が動かないよう、描画中は変えない。 */
   const [readAtOpen, setReadAtOpen] = useState(0);
+  /** ポップアップ表示中の画像 URL。 */
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  /** 画像だけを並べるモード。 */
+  const [imagesOnly, setImagesOnly] = useState(false);
 
   const cursorRef = useRef<DatCursor>(emptyCursor);
   const listRef = useRef<FlatList<ListItem>>(null);
@@ -246,6 +256,30 @@ export default function ThreadScreen() {
 
   const postsByRes = useMemo(() => new Map(posts.map((p) => [p.res, p])), [posts]);
 
+  /** スレ中の画像を、出てきた順に集める (画像だけ表示モード用)。 */
+  const imageList = useMemo(() => {
+    const out: { url: string; res: number }[] = [];
+    for (const p of ng.visible) {
+      for (const seg of segmentsByRes.get(p.res) ?? []) {
+        if (seg.type === 'image') out.push({ url: seg.url, res: p.res });
+      }
+    }
+    return out;
+  }, [ng.visible, segmentsByRes]);
+
+  /**
+   * ぼかすかどうかをレスごとに決める。
+   * 画像の中身は見ておらず、本文やスレタイの警告語で判断している (filter/sensitive.ts)。
+   */
+  const shouldBlur = useCallback(
+    (post: Post) => {
+      if (settings.blurImages === 'never') return false;
+      if (settings.blurImages === 'always') return true;
+      return looksSensitive(segmentsToPlainText(segmentsByRes.get(post.res) ?? []), threadTitle);
+    },
+    [settings.blurImages, segmentsByRes, threadTitle]
+  );
+
   const listData = useMemo(() => {
     const items: ListItem[] = [];
     let dividerPlaced = readAtOpen <= 0 || readAtOpen >= posts.length;
@@ -258,6 +292,13 @@ export default function ThreadScreen() {
     }
     return items;
   }, [ng.visible, readAtOpen, posts.length]);
+
+  /** 履歴から「自分のレス」を指定して開かれたとき、その行まで飛ぶ。 */
+  const focusIndex = useMemo(() => {
+    const target = Number(params.focusRes);
+    if (!Number.isFinite(target) || target <= 0) return -1;
+    return listData.findIndex((it) => it.kind === 'post' && it.post.res === target);
+  }, [params.focusRes, listData]);
 
   const dividerIndex = useMemo(() => listData.findIndex((i) => i.kind === 'divider'), [listData]);
 
@@ -352,9 +393,17 @@ export default function ThreadScreen() {
         options={{
           title: threadTitle ?? 'スレッド',
           headerRight: () => (
-            <Pressable onPress={toggleFavorite} hitSlop={10}>
-              <Text style={[styles.favStar, favorite && styles.favStarOn]}>★</Text>
-            </Pressable>
+            <View style={styles.headerActions}>
+              {/* 画像だけ並べるモード。スレを画像ビューアとして使いたいとき用。 */}
+              <Pressable onPress={() => setImagesOnly((v) => !v)} hitSlop={10}>
+                <Text style={[styles.headerIcon, imagesOnly && styles.headerIconOn]}>
+                  画像{imageList.length > 0 ? ` ${imageList.length}` : ''}
+                </Text>
+              </Pressable>
+              <Pressable onPress={toggleFavorite} hitSlop={10}>
+                <Text style={[styles.favStar, favorite && styles.favStarOn]}>★</Text>
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -380,7 +429,7 @@ export default function ThreadScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} />
         </View>
-      ) : (
+      ) : imagesOnly ? null : (
         <FlatList
           ref={listRef}
           data={listData}
@@ -388,7 +437,7 @@ export default function ThreadScreen() {
           initialNumToRender={20}
           windowSize={11}
           removeClippedSubviews
-          initialScrollIndex={dividerIndex > 0 ? dividerIndex : undefined}
+          initialScrollIndex={focusIndex > 0 ? focusIndex : dividerIndex > 0 ? dividerIndex : undefined}
           onScrollToIndexFailed={(info) => {
             // 行の高さが可変なので一度で飛べないことがある。描画が進んでから再試行する。
             setTimeout(() => {
@@ -409,12 +458,49 @@ export default function ThreadScreen() {
                 onRepliesPress={openReplies}
                 onIdPress={onIdPress}
                 showImages={settings.autoShowImages}
+                blurImages={shouldBlur(item.post)}
+                onImagePress={setViewerUrl}
                 fontSize={settings.fontSize}
               />
             )
           }
         />
       )}
+
+      {imagesOnly ? (
+        <FlatList
+          data={imageList}
+          keyExtractor={(it, i) => `${it.res}-${i}`}
+          numColumns={2}
+          contentContainerStyle={styles.grid}
+          ListEmptyComponent={
+            <Text style={styles.gridEmpty}>このスレに画像はありません。</Text>
+          }
+          renderItem={({ item }) => (
+            <Pressable style={styles.gridCell} onPress={() => setViewerUrl(item.url)}>
+              <Image
+                source={{ uri: item.url }}
+                style={styles.gridImage}
+                contentFit="cover"
+                transition={120}
+                blurRadius={
+                  settings.blurImages === 'always' ||
+                  (settings.blurImages === 'sensitive' &&
+                    looksSensitive(
+                      segmentsToPlainText(segmentsByRes.get(item.res) ?? []),
+                      threadTitle
+                    ))
+                    ? 60
+                    : 0
+                }
+              />
+              <Text style={styles.gridRes}>{item.res}</Text>
+            </Pressable>
+          )}
+        />
+      ) : null}
+
+      <ImageViewer url={viewerUrl} onClose={() => setViewerUrl(null)} />
 
       {error && !showEmpty ? <Text style={styles.errorBanner}>{error}</Text> : null}
 
@@ -469,6 +555,8 @@ export default function ThreadScreen() {
                     onRepliesPress={openReplies}
                     onIdPress={onIdPress}
                     showImages={settings.autoShowImages}
+                    blurImages={shouldBlur(p)}
+                    onImagePress={setViewerUrl}
                     fontSize={settings.fontSize}
                   />
                 ))
@@ -482,6 +570,23 @@ export default function ThreadScreen() {
 }
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  headerIcon: { color: colors.textDim, fontSize: 12 },
+  headerIconOn: { color: colors.accentHover, fontWeight: '700' },
+  grid: { padding: spacing.sm },
+  gridCell: { flex: 1 / 2, margin: spacing.xs, aspectRatio: 1 },
+  gridImage: { width: '100%', height: '100%', borderRadius: radius / 2, backgroundColor: colors.surface2 },
+  gridRes: {
+    position: 'absolute',
+    left: spacing.xs,
+    bottom: spacing.xs,
+    color: colors.text,
+    fontSize: 11,
+    backgroundColor: '#000000aa',
+    paddingHorizontal: 4,
+    borderRadius: 4,
+  },
+  gridEmpty: { color: colors.textDim, textAlign: 'center', padding: spacing.xl },
   container: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,

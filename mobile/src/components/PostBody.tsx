@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import * as WebBrowser from 'expo-web-browser';
-import { memo } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { memo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Segment } from '../parse/body';
 import { colors, radius, spacing } from '../theme/colors';
@@ -12,10 +12,21 @@ interface Props {
   onAnchorPress?: (from: number, to: number) => void;
   /** 画像を展開するか (モバイル回線では既定オフにする想定)。 */
   showImages?: boolean;
+  /** サムネイルにぼかしを掛ける。タップで解除する。 */
+  blurImages?: boolean;
+  /** 画像をタップしたとき。ポップアップ表示は画面側が持つ。 */
+  onImagePress?: (url: string) => void;
   fontSize?: number;
 }
 
-function PostBodyImpl({ segments, onAnchorPress, showImages = false, fontSize = 15 }: Props) {
+function PostBodyImpl({
+  segments,
+  onAnchorPress,
+  showImages = false,
+  blurImages = false,
+  onImagePress,
+  fontSize = 15,
+}: Props) {
   const images = showImages ? segments.filter((s) => s.type === 'image') : [];
 
   return (
@@ -29,8 +40,14 @@ function PostBodyImpl({ segments, onAnchorPress, showImages = false, fontSize = 
                   {seg.text}
                 </Text>
               );
-            case 'link':
             case 'image':
+              // 画像リンクはブラウザに飛ばさず、その場でポップアップする。
+              return (
+                <Text key={i} style={styles.link} onPress={() => onImagePress?.(seg.url)}>
+                  {seg.text}
+                </Text>
+              );
+            case 'link':
               return (
                 <Text key={i} style={styles.link} onPress={() => WebBrowser.openBrowserAsync(seg.url)}>
                   {seg.text}
@@ -44,12 +61,46 @@ function PostBodyImpl({ segments, onAnchorPress, showImages = false, fontSize = 
 
       {images.map((seg, i) =>
         seg.type === 'image' ? (
-          <Pressable key={`img-${i}`} onPress={() => WebBrowser.openBrowserAsync(seg.url)}>
-            <Image source={{ uri: seg.url }} style={styles.thumb} contentFit="cover" transition={120} />
-          </Pressable>
+          <Thumb key={`img-${i}`} url={seg.url} blurred={blurImages} onPress={onImagePress} />
         ) : null
       )}
     </>
+  );
+}
+
+/**
+ * サムネイル 1 枚。
+ *
+ * ぼかしが掛かっている間は、1 回目のタップでぼかしを外すだけにする。
+ * ぼかしたまま拡大表示に飛ぶと、見たくないものを避ける意味が無くなる。
+ */
+function Thumb({
+  url,
+  blurred,
+  onPress,
+}: {
+  url: string;
+  blurred: boolean;
+  onPress?: (url: string) => void;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const hidden = blurred && !revealed;
+
+  return (
+    <Pressable onPress={() => (hidden ? setRevealed(true) : onPress?.(url))}>
+      <Image
+        source={{ uri: url }}
+        style={styles.thumb}
+        contentFit="cover"
+        transition={120}
+        blurRadius={hidden ? 60 : 0}
+      />
+      {hidden ? (
+        <View style={styles.veil} pointerEvents="none">
+          <Text style={styles.veilText}>閲覧注意 — タップで表示</Text>
+        </View>
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -71,6 +122,19 @@ const styles = StyleSheet.create({
     borderRadius: radius / 2,
     marginTop: spacing.sm,
     backgroundColor: colors.surface2,
+  },
+  veil: {
+    ...StyleSheet.absoluteFill,
+    marginTop: spacing.sm,
+    borderRadius: radius / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#00000055',
+  },
+  veilText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

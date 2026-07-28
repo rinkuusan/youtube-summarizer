@@ -35,6 +35,8 @@ export interface Post {
   body: string;
   /** あぼーん (削除済み) レス。 */
   isAbone: boolean;
+  /** 自分が書いたレス。dat からは分からないので、DB から読むときにだけ立つ。 */
+  isMine?: boolean;
 }
 
 /** dat 全体のパース結果。 */

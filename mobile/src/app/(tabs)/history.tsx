@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ThreadRow } from '@/components/ThreadRow';
+import * as postRepo from '@/db/postRepo';
 import * as threadRepo from '@/db/threadRepo';
 import type { ThreadListItem } from '@/db/types';
 import { colors, spacing } from '@/theme/colors';
@@ -49,12 +50,28 @@ export default function HistoryScreen() {
     }, [load, segment])
   );
 
-  const openThread = useCallback((item: ThreadListItem) => {
-    router.push({
-      pathname: '/thread/[host]/[board]/[key]',
-      params: { host: item.host, board: item.board, key: item.key, title: item.title },
-    });
-  }, []);
+  const openThread = useCallback(
+    async (item: ThreadListItem) => {
+      // 「書き込み」から開いたときは、自分の最初のレスまで飛ばす。
+      // どのスレに書いたかより「何を書いたか」を見に行くことの方が多いため。
+      let focusRes: number | undefined;
+      if (segment === 'posted') {
+        const mine = await postRepo.mineResList(db, item);
+        focusRes = mine[0];
+      }
+      router.push({
+        pathname: '/thread/[host]/[board]/[key]',
+        params: {
+          host: item.host,
+          board: item.board,
+          key: item.key,
+          title: item.title,
+          ...(focusRes ? { focusRes: String(focusRes) } : {}),
+        },
+      });
+    },
+    [db, segment]
+  );
 
   const confirmRemove = useCallback(
     (item: ThreadListItem) => {

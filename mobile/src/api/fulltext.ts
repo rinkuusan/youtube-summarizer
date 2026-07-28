@@ -6,7 +6,7 @@ import { normalizeForSearch } from '../utils/normalize';
 import { fetchArchivedThread } from './archived';
 import { fetchDat } from './dat';
 import { computeMomentum } from './momentum';
-import { searchThreads } from './search';
+import { containsTerm, searchThreads, splitTerms } from './search';
 import { fetchThreadList } from './subject';
 
 /**
@@ -113,12 +113,18 @@ function makeSnippet(post: Post, normalizedQuery: string, span = 40): string {
 
 /** 既に手元にあるレス配列から検索する (scope='thread')。通信しない。 */
 export function searchLoadedPosts(posts: Post[], query: string, target: SearchTarget): PostHit[] {
-  const q = normalizeForSearch(query.trim());
-  if (!q) return [];
+  // `|` 区切りは OR。「X|Twitter|ツイッター」のように書けるようにする。
+  const terms = splitTerms(query).map(normalizeForSearch).filter(Boolean);
+  if (terms.length === 0) return [];
 
-  return posts
-    .filter((p) => !p.isAbone && searchableText(p).includes(q))
-    .map((post) => ({ ...target, post, snippet: makeSnippet(post, q) }));
+  const out: PostHit[] = [];
+  for (const post of posts) {
+    if (post.isAbone) continue;
+    const text = searchableText(post);
+    const hit = terms.find((t) => containsTerm(text, t));
+    if (hit) out.push({ ...target, post, snippet: makeSnippet(post, hit) });
+  }
+  return out;
 }
 
 /** 板の中から、勢い上位 limit 本のスレを検索対象にする。 */
@@ -174,8 +180,7 @@ export async function searchTargets(
   onProgress: (p: SearchProgress) => void,
   signal?: AbortSignal
 ): Promise<PostHit[]> {
-  const q = normalizeForSearch(query.trim());
-  if (!q || targets.length === 0) return [];
+  if (splitTerms(query).length === 0 || targets.length === 0) return [];
 
   const results: PostHit[] = [];
   const progress: SearchProgress = { done: 0, total: targets.length, hits: 0, failed: 0 };

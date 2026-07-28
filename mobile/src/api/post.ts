@@ -36,6 +36,8 @@ export interface PostDraft {
   name: string;
   mail: string;
   message: string;
+  /** スレ立てのときだけ入れる。既存スレへのレスでは使わない。 */
+  subject?: string;
 }
 
 export interface PostOptions {
@@ -64,7 +66,10 @@ function bbsCgiUrl(host: string): string {
 }
 
 function refererUrl(ref: ThreadRef): string {
-  return `https://${ref.host}/test/read.cgi/${ref.board}/${ref.key}/`;
+  // スレ立て時はまだスレが無いので板のトップを名乗る。
+  return ref.key
+    ? `https://${ref.host}/test/read.cgi/${ref.board}/${ref.key}/`
+    : `https://${ref.host}/${ref.board}/`;
 }
 
 /** 手元で分かる連投規制。無駄に 5ch 側の規制カウントを踏ませない。 */
@@ -110,13 +115,14 @@ export async function submitPost(
 
   const fields: Record<string, string> = {
     bbs: ref.board,
-    key: ref.key,
+    // スレ立ては key の代わりに subject を送る。両方は送らない。
+    ...(draft.subject ? { subject: draft.subject } : { key: ref.key }),
     // 新しすぎる値を弾くサーバがあるので 60 秒過去にする
     time: String(Math.floor(Date.now() / 1000) - 60),
     FROM: draft.name,
     mail: draft.mail,
     MESSAGE: draft.message,
-    submit: '書き込む',
+    submit: draft.subject ? '新規スレッド作成' : '書き込む',
   };
 
   // 承諾して送り直すときは、確認ページのフォームの値を上書きで積む。

@@ -16,6 +16,10 @@ interface Props {
   onRepliesPress?: (res: number) => void;
   onIdPress?: (uid: string) => void;
   showImages?: boolean;
+  /** サムネイルにぼかしを掛ける。 */
+  blurImages?: boolean;
+  /** 画像タップ。ポップアップ表示は画面側が持つ。 */
+  onImagePress?: (url: string) => void;
   fontSize?: number;
 }
 
@@ -27,6 +31,8 @@ function PostItemImpl({
   onRepliesPress,
   onIdPress,
   showImages,
+  blurImages,
+  onImagePress,
   fontSize,
 }: Props) {
   if (post.isAbone) {
@@ -38,9 +44,10 @@ function PostItemImpl({
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, post.isMine && styles.mine]}>
       <View style={styles.header}>
-        <Text style={styles.res}>{post.res}</Text>
+        <Text style={[styles.res, post.isMine && styles.resMine]}>{post.res}</Text>
+        {post.isMine ? <Text style={styles.mineBadge}>自分</Text> : null}
         <Text style={styles.name} numberOfLines={1}>
           {post.name || '名無し'}
           {post.trip ? <Text style={styles.trip}> {post.trip}</Text> : null}
@@ -62,6 +69,8 @@ function PostItemImpl({
         segments={segments}
         onAnchorPress={onAnchorPress}
         showImages={showImages}
+        blurImages={blurImages}
+        onImagePress={onImagePress}
         fontSize={fontSize}
       />
 
@@ -80,6 +89,26 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+  },
+  /**
+   * 自分のレス。スレを流し読みしていて目に留まる程度に留める。
+   * 左の縦線と薄い下地だけで、本文の可読性は変えない。
+   */
+  mine: {
+    backgroundColor: '#7c6cff14',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    paddingLeft: spacing.lg - 3,
+  },
+  resMine: { fontWeight: '700' },
+  mineBadge: {
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: '700',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accent,
+    borderRadius: 4,
+    paddingHorizontal: 4,
   },
   header: {
     flexDirection: 'row',

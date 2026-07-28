@@ -42,26 +42,39 @@ export async function searchThreads(
   query: string,
   signal?: AbortSignal
 ): Promise<ThreadSearchResult> {
-  const q = query.trim();
-  if (!q) return { all: [], matched: [] };
+  const terms = splitTerms(query);
+  if (terms.length === 0) return { all: [], matched: [] };
 
-  const url = searchUrl(q);
-  const res = await fetchBytes(url, { signal });
-  if (res.status !== 200) throw errorFromStatus(res.status, url);
+  // find.5ch は 1 リクエスト 1 語なので、OR の語は個別に引いて束ねる。
+  const seen = new Set<string>();
+  const all: SearchHit[] = [];
+  for (const term of terms) {
+    const url = searchUrl(term);
+    const res = await fetchBytes(url, { signal });
+    if (res.status !== 200) throw errorFromStatus(res.status, url);
 
-  const html = new TextDecoder().decode(res.bytes);
-  const all = parseFindHtml(html);
+    const html = new TextDecoder().decode(res.bytes);
+    const hits = parseFindHtml(html);
 
-  // 0 件は「該当なし」かもしれないし「HTML が変わって解析できていない」かもしれない。
-  // 検索結果ページらしさを見て切り分ける。
-  if (all.length === 0 && !/list_line|該当|見つかりません|0件/.test(html)) {
-    throw new Ch5Error(
-      'parse',
-      '検索結果を解析できませんでした。5ch 側の仕様が変わった可能性があります。',
-      { url }
-    );
+    // 0 件は「該当なし」かもしれないし「HTML が変わって解析できていない」かもしれない。
+    // 検索結果ページらしさを見て切り分ける。
+    if (hits.length === 0 && !/list_line|該当|見つかりません|0件/.test(html)) {
+      throw new Ch5Error(
+        'parse',
+        '検索結果を解析できませんでした。5ch 側の仕様が変わった可能性があります。',
+        { url }
+      );
+    }
+
+    for (const h of hits) {
+      const id = `${h.host}/${h.board}/${h.key}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      all.push(h);
+    }
   }
 
+  const q = terms.join('|');
   const matched = filterByTitle(all, q);
   log(
     'info',
@@ -73,11 +86,55 @@ export async function searchThreads(
   return { all, matched };
 }
 
-/** タイトルにクエリを実際に含むものだけ残す。カタカナ/ひらがな/全角半角のゆれは吸収する。 */
+/**
+ * クエリを OR の語に割る。区切りは `|`。
+ *
+ * 「X」のように語そのものが一般的すぎる対象を探すために要る。
+ * X (旧 Twitter) は "X" だけだと何にでも当たり、"Twitter" だけだと
+ * 今の書かれ方を取りこぼす。`X|Twitter|ツイッター|ツイート` と並べて拾う。
+ */
+export function splitTerms(query: string): string[] {
+  return query
+    .split('|')
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/** 英数字。短い英字語の「単語として」の一致を見るのに使う。 */
+const ALNUM = /[0-9a-z]/;
+
+/**
+ * 語がテキストに「単語として」含まれるか。
+ *
+ * 2 文字以下の英数字の語 (X, AI, PC など) は、素の部分一致だと
+ * Xperia・MAX・PCR のような無関係に当たり続ける。前後が英数字でないときだけ
+ * 一致とみなす。日本語の語には語境界の概念が薄いので、この判定は掛けない。
+ */
+export function containsTerm(haystack: string, term: string): boolean {
+  const at = haystack.indexOf(term);
+  if (at < 0) return false;
+  if (term.length > 2 || !/^[0-9a-z]+$/.test(term)) return true;
+
+  // 出現位置を順に見て、前後が英数字でないものが 1 つでもあれば一致。
+  for (let i = at; i >= 0; i = haystack.indexOf(term, i + 1)) {
+    const before = i > 0 ? haystack[i - 1] : '';
+    const after = haystack[i + term.length] ?? '';
+    if (!ALNUM.test(before) && !ALNUM.test(after)) return true;
+  }
+  return false;
+}
+
+/**
+ * タイトルにクエリを実際に含むものだけ残す。
+ * カタカナ/ひらがな/全角半角のゆれは吸収し、`|` 区切りは OR として扱う。
+ */
 export function filterByTitle(hits: SearchHit[], query: string): SearchHit[] {
-  const nq = normalizeForSearch(query.trim());
-  if (!nq) return hits;
-  return hits.filter((h) => normalizeForSearch(h.title).includes(nq));
+  const terms = splitTerms(query).map(normalizeForSearch).filter(Boolean);
+  if (terms.length === 0) return hits;
+  return hits.filter((h) => {
+    const title = normalizeForSearch(h.title);
+    return terms.some((t) => containsTerm(title, t));
+  });
 }
 
 export type { SearchHit };

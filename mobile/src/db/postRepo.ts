@@ -25,6 +25,7 @@ function toPost(r: PostRow): Post {
     be: null,
     body: r.body,
     isAbone: r.is_abone === 1,
+    isMine: r.is_mine === 1,
   };
 }
 
@@ -82,6 +83,15 @@ export async function clear(db: SQLiteDatabase, ref: ThreadRef): Promise<void> {
 }
 
 /** 自分が書いたレスに印を付ける。 */
+/** そのスレで自分が書いたレス番号。履歴から飛ぶのに使う。 */
+export async function mineResList(db: SQLiteDatabase, ref: ThreadRef): Promise<number[]> {
+  const rows = await db.getAllAsync<{ res: number }>(
+    'SELECT res FROM post WHERE host = ? AND board = ? AND key = ? AND is_mine = 1 ORDER BY res ASC',
+    [ref.host, ref.board, ref.key]
+  );
+  return rows.map((r) => r.res);
+}
+
 export async function markMine(
   db: SQLiteDatabase,
   ref: ThreadRef,
