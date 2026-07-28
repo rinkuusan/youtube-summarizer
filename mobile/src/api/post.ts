@@ -155,7 +155,7 @@ export async function submitPost(
 
   const html = decodeSjis(res.bytes);
   const result = classifyPostResponse(html, res.status);
-  logPostExchange(url, fields, cookie, getHeaders(res.headers, 'set-cookie'), html, result, opts);
+  logPostExchange(url, headers, fields, cookie, getHeaders(res.headers, 'set-cookie'), html, result, opts);
   return result;
 }
 
@@ -171,6 +171,7 @@ export async function submitPost(
  */
 function logPostExchange(
   url: string,
+  sentHeaders: Record<string, string>,
   sentFields: Record<string, string>,
   sentCookie: string | null,
   setCookie: string[],
@@ -192,8 +193,12 @@ function logPostExchange(
     'info',
     'post',
     `結果=${result.outcome} 承諾=${opts.accepted ? 'あり' : 'なし'} title=${title}` +
+      ` | 種別=${sentFields.subject !== undefined ? 'スレ立て' : 'レス'}` +
       ` | 送信フィールド=${Object.keys(sentFields).join(',')}` +
       ` | 送信先=${url}` +
+      // 「余所でやってくれ」は bbs.cgi が Referer を見て出すので、必ず記録する。
+      ` | Referer=${sentHeaders.Referer ?? '(なし)'}` +
+      ` | bbs=${sentFields.bbs ?? '-'} key=${sentFields.key ?? '-'}` +
       ` | 応答form action=${actions.length ? actions.join(' , ') : '(なし)'}` +
       ` | 応答input=${inputs.join(' ')}` +
       ` | 送信Cookie=${sent.length ? sent.join(',') : 'なし'}` +

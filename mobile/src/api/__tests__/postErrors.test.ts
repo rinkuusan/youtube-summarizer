@@ -139,3 +139,15 @@ describe('確認ページの実物の書き方', () => {
     expect(r.formFields.MESSAGE).toBe('本文');
   });
 });
+
+describe('余所でやってくれ', () => {
+  // 規制と紛らわしいが、こちらの送り方 (Referer) の問題でも出るので分けて扱う。
+  it('規制ではなく wrongReferer として分類する', () => {
+    const r = classifyPostResponse(page('ERROR', 'ERROR:余所でやってくれ'));
+    expect(r.outcome).toBe('wrongReferer');
+  });
+
+  it('本物の規制は banned のまま', () => {
+    expect(classifyPostResponse(page('ERROR', 'ホストが規制されています')).outcome).toBe('banned');
+  });
+});
