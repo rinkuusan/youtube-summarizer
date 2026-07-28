@@ -18,6 +18,7 @@ import { fetchThreadList, type ThreadSummary } from '@/api/subject';
 import * as threadRepo from '@/db/threadRepo';
 import type { ThreadListItem } from '@/db/types';
 import { toDisplayMessage } from '@/net/errors';
+import * as recentBoards from '@/db/recentBoards';
 import { colors, radius, spacing } from '@/theme/colors';
 import { normalizeForSearch } from '@/utils/normalize';
 
@@ -90,6 +91,11 @@ export default function ThreadListScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 「最近見た板」に記録する。板一覧の先頭に出すためのもの。
+  useEffect(() => {
+    recentBoards.touch(db, { host, board, name: name ?? board }).catch(() => undefined);
+  }, [db, host, board, name]);
 
   const visible = useMemo(() => {
     if (!threads) return [];

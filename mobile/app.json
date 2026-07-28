@@ -35,7 +35,15 @@
         }
       ],
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "画像をギャラリーに保存するために使用します。",
+          "savePhotosPermission": "画像をギャラリーに保存するために使用します。",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

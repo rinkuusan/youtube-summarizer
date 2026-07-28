@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -14,6 +14,7 @@ import {
 
 import { fetchBoards, groupByCategory, type Board } from '@/api/bbsmenu';
 import * as boardRepo from '@/db/boardRepo';
+import * as recentBoards from '@/db/recentBoards';
 import { toDisplayMessage } from '@/net/errors';
 import { colors, radius, spacing } from '@/theme/colors';
 import { normalizeForSearch } from '@/utils/normalize';
@@ -24,6 +25,7 @@ export default function BoardListScreen() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [recent, setRecent] = useState<recentBoards.RecentBoard[]>([]);
 
   /**
    * bbsmenu.json は 180KB あるので毎回は取りに行かない。
@@ -57,6 +59,13 @@ export default function BoardListScreen() {
     load();
   }, [load]);
 
+  // 「最近見た板」は板を開くたびに変わるので、画面に戻るたびに読み直す。
+  useFocusEffect(
+    useCallback(() => {
+      recentBoards.list(db).then(setRecent).catch(() => undefined);
+    }, [db])
+  );
+
   const toggleFavoriteBoard = useCallback(
     async (b: Board) => {
       const isFav = await boardRepo.isFavoriteBoard(db, b.host, b.id);
@@ -66,17 +75,38 @@ export default function BoardListScreen() {
     [db]
   );
 
+  /** 最近見た板を Board の形に戻す。板一覧に無い板は落とす。 */
+  const recentSection = useMemo(() => {
+    if (!boards || recent.length === 0) return null;
+    const byId = new Map(boards.map((b) => [`${b.host}/${b.id}`, b]));
+    const data = recent
+      .map((r) => byId.get(`${r.host}/${r.board}`))
+      .filter((b): b is Board => b !== undefined);
+    if (data.length === 0) return null;
+    return { title: '最近見た板', data, count: data.length };
+  }, [boards, recent]);
+
   const sections = useMemo(() => {
     if (!boards) return [];
     const q = normalizeForSearch(query.trim());
     const grouped = groupByCategory(boards);
 
     if (!q) {
-      return grouped.map((g) => ({
-        title: g.name,
-        data: collapsed[g.name] ? [] : g.boards,
-        count: g.boards.length,
-      }));
+      // 最近見た板は常に先頭。カテゴリの開閉とは独立に扱う。
+      const head = recentSection && !collapsed[recentSection.title] ? [recentSection] : [];
+      const headCollapsed =
+        recentSection && collapsed[recentSection.title]
+          ? [{ ...recentSection, data: [] as Board[] }]
+          : [];
+      return [
+        ...head,
+        ...headCollapsed,
+        ...grouped.map((g) => ({
+          title: g.name,
+          data: collapsed[g.name] ? [] : g.boards,
+          count: g.boards.length,
+        })),
+      ];
     }
 
     // 絞り込み中はカテゴリの開閉を無視して、一致した板だけ出す。
@@ -87,7 +117,7 @@ export default function BoardListScreen() {
       }))
       .filter((g) => g.data.length > 0)
       .map((g) => ({ ...g, count: g.data.length }));
-  }, [boards, query, collapsed]);
+  }, [boards, query, collapsed, recentSection]);
 
   if (error) {
     return (

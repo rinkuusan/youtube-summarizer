@@ -1,6 +1,7 @@
 import { DarkTheme, router, Stack, ThemeProvider } from 'expo-router';
 import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { migrate } from '@/db/migrations';
@@ -41,6 +42,7 @@ const openLogs = () => router.push('/logs');
 
 export default function RootLayout() {
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SQLiteProvider databaseName="gochviewer.db" onInit={initDatabase}>
       <ThemeProvider value={theme}>
         <StatusBar style="light" />
@@ -58,5 +60,6 @@ export default function RootLayout() {
         </ErrorBoundary>
       </ThemeProvider>
     </SQLiteProvider>
+    </GestureHandlerRootView>
   );
 }

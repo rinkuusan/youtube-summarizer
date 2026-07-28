@@ -87,7 +87,10 @@ function Thumb({
   const hidden = blurred && !revealed;
 
   return (
-    <Pressable onPress={() => (hidden ? setRevealed(true) : onPress?.(url))}>
+    <Pressable
+      onPress={() => (hidden ? setRevealed(true) : onPress?.(url))}
+      // 長押しでもビューアを開く。保存はビューア側の長押しで行う。
+      onLongPress={() => (hidden ? setRevealed(true) : onPress?.(url))}>
       <Image
         source={{ uri: url }}
         style={styles.thumb}
