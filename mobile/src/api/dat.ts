@@ -1,4 +1,4 @@
-import { errorFromStatus } from '../net/errors';
+import { Ch5Error, errorFromStatus } from '../net/errors';
 import { fetchBytes, getHeader } from '../net/http';
 import { decodeCompleteLines } from '../net/sjis';
 
@@ -67,9 +67,26 @@ function cursorFrom(headers: [string, string][], bytes: number, lineCount: numbe
   };
 }
 
+/**
+ * 200 なのに中身が空、を弾く。
+ *
+ * 5ch は不安定な瞬間に、実在するスレへ 200 + 0 バイトを返すことがある
+ * (実測 2026-07-29: 同じ dat が 5 分前は 93579B、次は 0B で 8.2 秒かかった)。
+ * これを「スレが空になった」と解釈すると、取得済みのキャッシュを消して
+ * 0 レス表示にしてしまう。異常として扱い、呼び出し側にキャッシュを保たせる。
+ */
+function assertNotEmpty(bytes: Uint8Array, url: string): void {
+  if (bytes.length > 0) return;
+  throw new Ch5Error('server', '5ch が空の応答を返しました。時間をおいて再取得してください。', {
+    status: 200,
+    url,
+  });
+}
+
 async function fetchFull(url: string, signal?: AbortSignal): Promise<DatFetchResult> {
   const res = await fetchBytes(url, { signal });
   if (res.status !== 200) throw errorFromStatus(res.status, url);
+  assertNotEmpty(res.bytes, url);
 
   const { lines, consumed } = decodeCompleteLines(res.bytes);
   return {
@@ -114,7 +131,7 @@ export async function fetchDat(
   }
   // If-Range 不一致。サーバが全体を返してきた。
   if (res.status === 200) {
-    return { ...(await parseFullFrom(res)), refetched: true };
+    return { ...(await parseFullFrom(res, url)), refetched: true };
   }
   if (res.status === 304) {
     return {
@@ -156,10 +173,12 @@ export async function fetchDat(
 }
 
 /** 既に受け取った 200 応答から全体パース結果を作る (再取得を避ける)。 */
-async function parseFullFrom(res: {
-  bytes: Uint8Array;
-  headers: [string, string][];
-}): Promise<DatFetchResult> {
+async function parseFullFrom(
+  res: { bytes: Uint8Array; headers: [string, string][] },
+  url: string
+): Promise<DatFetchResult> {
+  // ここは「あぼーん等で全体を取り直した」経路。空を通すとキャッシュを消してしまう。
+  assertNotEmpty(res.bytes, url);
   const { lines, consumed } = decodeCompleteLines(res.bytes);
   return {
     kind: 'full',
