@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import { fetchArchivedThread } from '@/api/archived';
+import { findNextThreadCandidates, type NextThreadCandidate } from '@/api/nextThread';
 import { emptyCursor, fetchDat, type DatCursor } from '@/api/dat';
 import { bodyMatchesMine, takePendingMine } from '@/api/post';
 import { PostItem } from '@/components/PostItem';
@@ -28,6 +29,7 @@ import { logError } from '@/net/log';
 import { Image } from 'expo-image';
 
 import { ImageViewer } from '@/components/ImageViewer';
+import { ScrollSlider } from '@/components/ScrollSlider';
 import { looksSensitive } from '@/filter/sensitive';
 import { anchorTargets, parseBody, segmentsToPlainText, type Segment } from '@/parse/body';
 import { parseDatLine, type Post } from '@/parse/datLine';
@@ -75,6 +77,11 @@ export default function ThreadScreen() {
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   /** 画像だけを並べるモード。 */
   const [imagesOnly, setImagesOnly] = useState(false);
+  /** 高速スクローラ用。リストの実寸と現在位置。 */
+  const [scrollGeom, setScrollGeom] = useState({ offset: 0, content: 1, layout: 1 });
+  /** 次スレ候補。null = まだ探していない。 */
+  const [nextCandidates, setNextCandidates] = useState<NextThreadCandidate[] | null>(null);
+  const [nextLoading, setNextLoading] = useState(false);
 
   const cursorRef = useRef<DatCursor>(emptyCursor);
   const listRef = useRef<FlatList<ListItem>>(null);
@@ -390,6 +397,26 @@ export default function ThreadScreen() {
     return out;
   }, [current, postsByRes]);
 
+  /** 次スレ候補を同じ板から探す。題名の芯を突き合わせるだけなので通信は 1 回。 */
+  const findNext = useCallback(async () => {
+    if (nextLoading) return;
+    setNextLoading(true);
+    try {
+      const found = await findNextThreadCandidates(host, board, key, threadTitle ?? '');
+      setNextCandidates(found);
+      if (found.length === 0) Alert.alert('次スレ候補', '同じ板に、それらしい新しいスレは見つかりませんでした。');
+    } catch (e) {
+      Alert.alert('次スレ候補', toDisplayMessage(e));
+    } finally {
+      setNextLoading(false);
+    }
+  }, [host, board, key, threadTitle, nextLoading]);
+
+  const scrollProgress =
+    scrollGeom.content > scrollGeom.layout
+      ? scrollGeom.offset / (scrollGeom.content - scrollGeom.layout)
+      : 0;
+
   const showEmpty = posts.length === 0;
 
   return (
@@ -435,12 +462,29 @@ export default function ThreadScreen() {
           <ActivityIndicator color={colors.accent} />
         </View>
       ) : imagesOnly ? null : (
+        <View
+          style={styles.listWrap}
+          onLayout={(e) =>
+            setScrollGeom((g) => ({ ...g, layout: e.nativeEvent.layout.height }))
+          }>
         <FlatList
           ref={listRef}
           data={listData}
           keyExtractor={(item, i) => (item.kind === 'post' ? `p${item.post.res}` : `d${i}`)}
-          initialNumToRender={20}
-          windowSize={11}
+          initialNumToRender={30}
+          windowSize={21}
+          // 「最新へ」で末尾まで飛ぶとき、描画が小分けだと数十件ずつ現れて
+          // 読み込み直しに見える。1 度に描く量を増やして一気に埋める。
+          maxToRenderPerBatch={60}
+          updateCellsBatchingPeriod={16}
+          onScroll={(e) =>
+            setScrollGeom({
+              offset: e.nativeEvent.contentOffset.y,
+              content: e.nativeEvent.contentSize.height,
+              layout: e.nativeEvent.layoutMeasurement.height,
+            })
+          }
+          scrollEventThrottle={32}
           removeClippedSubviews
           initialScrollIndex={focusIndex > 0 ? focusIndex : dividerIndex > 0 ? dividerIndex : undefined}
           onScrollToIndexFailed={(info) => {
@@ -470,6 +514,22 @@ export default function ThreadScreen() {
             )
           }
         />
+
+        {/* 右端の高速スクローラ。長いスレを一気に上下するためのもの。 */}
+        {scrollGeom.content > scrollGeom.layout * 1.5 ? (
+          <ScrollSlider
+            height={scrollGeom.layout}
+            progress={scrollProgress}
+            label={`${Math.max(1, Math.round(scrollProgress * (ng.visible.length || 1)))} / ${ng.visible.length}`}
+            onScrub={(ratio) =>
+              listRef.current?.scrollToOffset({
+                offset: ratio * Math.max(scrollGeom.content - scrollGeom.layout, 0),
+                animated: false,
+              })
+            }
+          />
+        ) : null}
+        </View>
       )}
 
       {imagesOnly ? (
@@ -507,6 +567,43 @@ export default function ThreadScreen() {
 
       <ImageViewer url={viewerUrl} onClose={() => setViewerUrl(null)} />
 
+      {/*
+        次スレ候補。どれが本物かは題名だけでは決め切れないので、
+        自動で飛ばさず候補を並べて人に選ばせる。
+      */}
+      <Modal
+        visible={(nextCandidates?.length ?? 0) > 0}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNextCandidates(null)}>
+        <Pressable style={styles.nextBackdrop} onPress={() => setNextCandidates(null)}>
+          <View style={styles.nextSheet}>
+            <Text style={styles.nextTitle}>次スレ候補</Text>
+            <ScrollView style={styles.nextList}>
+              {(nextCandidates ?? []).map((c) => (
+                <Pressable
+                  key={c.key}
+                  style={styles.nextRow}
+                  onPress={() => {
+                    setNextCandidates(null);
+                    router.push({
+                      pathname: '/thread/[host]/[board]/[key]',
+                      params: { host: c.host, board: c.board, key: c.key, title: c.title },
+                    });
+                  }}>
+                  <Text style={styles.nextRowTitle} numberOfLines={2}>
+                    {c.title}
+                  </Text>
+                  <Text style={styles.nextRowMeta}>
+                    {c.resCount}レス ・ 一致度 {Math.round(c.similarity * 100)}%
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
       {error && !showEmpty ? <Text style={styles.errorBanner}>{error}</Text> : null}
 
       <View style={styles.footer}>
@@ -518,8 +615,13 @@ export default function ThreadScreen() {
         </Pressable>
         <Pressable
           style={styles.buttonGhost}
-          onPress={() => listRef.current?.scrollToEnd({ animated: true })}>
+          // アニメで飛ぶと途中の行を全部描画しながら進むため、一気に跳ばす。
+          onPress={() => listRef.current?.scrollToEnd({ animated: false })}>
           <Text style={styles.buttonGhostText}>最新へ</Text>
+        </Pressable>
+
+        <Pressable style={styles.buttonGhost} onPress={findNext} disabled={nextLoading}>
+          <Text style={styles.buttonGhostText}>{nextLoading ? '検索中' : '次スレ'}</Text>
         </Pressable>
         <Pressable
           style={styles.button}
@@ -575,6 +677,37 @@ export default function ThreadScreen() {
 }
 
 const styles = StyleSheet.create({
+  nextBackdrop: {
+    flex: 1,
+    backgroundColor: '#000000cc',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  nextSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: radius,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    maxHeight: '70%',
+    paddingVertical: spacing.md,
+  },
+  nextTitle: {
+    color: colors.accentHover,
+    fontSize: 13,
+    fontWeight: '700',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  nextList: { paddingHorizontal: spacing.lg },
+  nextRow: {
+    paddingVertical: spacing.md,
+    gap: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  nextRowTitle: { color: colors.text, fontSize: 15, lineHeight: 21 },
+  nextRowMeta: { color: colors.textDim, fontSize: 11 },
+  listWrap: { flex: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   headerIcon: { color: colors.textDim, fontSize: 12 },
   headerIconOn: { color: colors.accentHover, fontWeight: '700' },
