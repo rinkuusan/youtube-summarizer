@@ -12,9 +12,10 @@ import {
 
 import {
   collectAllTargets,
+  groupByThread,
   searchTargets,
-  type PostHit,
   type SearchProgress,
+  type ThreadHit as BodyThreadHit,
 } from '@/api/fulltext';
 import { searchThreads, SEARCH_RESULT_LIMIT, type SearchHit } from '@/api/search';
 import { toDisplayMessage } from '@/net/errors';
@@ -42,7 +43,8 @@ export default function SearchScreen() {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   /** find.5ch が返した総数。何件を無関係として捨てたか出すために持つ。 */
   const [rawCount, setRawCount] = useState(0);
-  const [postHits, setPostHits] = useState<PostHit[] | null>(null);
+  /** 本文検索の結果。レス単位ではなくスレ単位に畳んで持つ。 */
+  const [bodyHits, setBodyHits] = useState<BodyThreadHit[] | null>(null);
   const [progress, setProgress] = useState<SearchProgress | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export default function SearchScreen() {
     setLoading(true);
     setError(null);
     setHits(null);
-    setPostHits(null);
+    setBodyHits(null);
     setProgress(null);
 
     try {
@@ -71,7 +73,8 @@ export default function SearchScreen() {
       } else {
         const targets = await collectAllTargets(trimmed, BODY_SCAN_LIMIT, ac.signal);
         setProgress({ done: 0, total: targets.length, hits: 0, failed: 0 });
-        setPostHits(await searchTargets(targets, trimmed, setProgress, ac.signal));
+        const hits = await searchTargets(targets, trimmed, setProgress, ac.signal);
+        setBodyHits(groupByThread(hits));
       }
     } catch (e) {
       setError(toDisplayMessage(e));
@@ -109,16 +112,16 @@ export default function SearchScreen() {
         </Text>
       );
     }
-    if (postHits && progress) {
+    if (bodyHits && progress) {
       return (
         <Text style={styles.count}>
-          {postHits.length} レス / {progress.done} スレ走査
+          {bodyHits.length} スレ / {progress.hits} レス一致 ・ {progress.done} スレ走査
           {progress.failed > 0 ? `（${progress.failed} スレ取得失敗）` : ''}
         </Text>
       );
     }
     return null;
-  }, [hits, rawCount, postHits, progress]);
+  }, [hits, rawCount, bodyHits, progress]);
 
   return (
     <View style={styles.container}>
@@ -212,10 +215,10 @@ export default function SearchScreen() {
             </Pressable>
           )}
         />
-      ) : postHits ? (
+      ) : bodyHits ? (
         <FlatList
-          data={postHits}
-          keyExtractor={(h) => `${h.key}:${h.post.res}`}
+          data={bodyHits}
+          keyExtractor={(h) => `${h.host}/${h.board}/${h.key}`}
           ListHeaderComponent={header}
           ListEmptyComponent={
             <View style={styles.center}>
@@ -229,8 +232,9 @@ export default function SearchScreen() {
               </Text>
               <Text style={styles.snippet}>{item.snippet}</Text>
               <View style={styles.metaRow}>
-                <Text style={styles.meta}>{item.post.res}レス目</Text>
-                <Text style={styles.meta}>{item.post.name}</Text>
+                {/* 同じ語が連呼されるスレでも 1 行に畳み、件数だけ添える */}
+                <Text style={styles.momentum}>{item.count}件一致</Text>
+                <Text style={styles.meta}>{item.post.res}レス目〜</Text>
                 <Text style={styles.meta}>{item.post.dateText}</Text>
               </View>
             </Pressable>

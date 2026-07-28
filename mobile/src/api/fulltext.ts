@@ -1,7 +1,9 @@
+import { Ch5Error } from '../net/errors';
 import { log, logError } from '../net/log';
 import { parseBody, segmentsToPlainText } from '../parse/body';
 import { parseDat, type Post } from '../parse/datLine';
 import { normalizeForSearch } from '../utils/normalize';
+import { fetchArchivedThread } from './archived';
 import { fetchDat } from './dat';
 import { computeMomentum } from './momentum';
 import { searchThreads } from './search';
@@ -37,6 +39,49 @@ export interface PostHit extends SearchTarget {
   post: Post;
   /** 一致箇所の周辺を切り出した表示用テキスト。 */
   snippet: string;
+}
+
+/** スレ単位にまとめた検索結果。同じ語が何度も出るスレを何行も出さないため。 */
+export interface ThreadHit extends SearchTarget {
+  /** そのスレ内で一致したレス数。 */
+  count: number;
+  /** 代表として見せる最初の一致レス。 */
+  post: Post;
+  snippet: string;
+}
+
+/**
+ * レス単位の一致をスレ単位にまとめる。
+ *
+ * 実況板のように同じ語が連呼されるスレだと、レスの数だけ同じスレが並んでしまう。
+ * 一覧では「どのスレに有るか」が知りたいので、スレ 1 行に畳んで件数を添える。
+ * 並び順は最初に見つかった順を保つ (勢い順に走査しているため意味がある)。
+ */
+export function groupByThread(hits: PostHit[]): ThreadHit[] {
+  const byThread = new Map<string, ThreadHit>();
+  for (const h of hits) {
+    const id = `${h.host}/${h.board}/${h.key}`;
+    const found = byThread.get(id);
+    if (found) {
+      found.count++;
+      // 代表は最も若いレス番号にする (スレの主題に近いことが多い)。
+      if (h.post.res < found.post.res) {
+        found.post = h.post;
+        found.snippet = h.snippet;
+      }
+    } else {
+      byThread.set(id, {
+        host: h.host,
+        board: h.board,
+        key: h.key,
+        title: h.title,
+        count: 1,
+        post: h.post,
+        snippet: h.snippet,
+      });
+    }
+  }
+  return [...byThread.values()];
 }
 
 export interface SearchProgress {
@@ -146,8 +191,16 @@ export async function searchTargets(
       const t = targets[i];
 
       try {
-        const r = await fetchDat(t.host, t.board, t.key, undefined, signal);
-        const { posts } = parseDat(r.lines);
+        let posts: Post[];
+        try {
+          const r = await fetchDat(t.host, t.board, t.key, undefined, signal);
+          posts = parseDat(r.lines).posts;
+        } catch (e) {
+          // スレタイ検索は板から落ちたスレも返してくる。実測ではその方が多数派なので、
+          // dat 404 で諦めると本文検索がほとんど空振りする。read.cgi から拾い直す。
+          if (!(e instanceof Ch5Error && e.kind === 'notFound')) throw e;
+          posts = (await fetchArchivedThread(t.host, t.board, t.key, signal)).posts;
+        }
         const found = searchLoadedPosts(posts, query, t);
         results.push(...found);
         progress.hits += found.length;
