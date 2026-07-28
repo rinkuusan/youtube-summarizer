@@ -4,7 +4,7 @@ import * as MediaLibrary from 'expo-media-library';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -130,8 +130,10 @@ export function ImageViewer({ url, onClose }: Props) {
       runOnJS(save)();
     });
 
-  // 長押しはタップより先に取り、拡大中の移動はピンチと同時に効かせる。
-  const gesture = Gesture.Exclusive(longPress, Gesture.Simultaneous(pinch, pan), doubleTapLike);
+  // 離散的な操作 (長押し / タップ) はどちらか一方だけ。
+  // 拡縮と移動は同時に効かせる。Exclusive で全部を包むと、先頭の長押しが
+  // 後続を塞いでタップもピンチも効かなくなる。
+  const gesture = Gesture.Simultaneous(pinch, pan, Gesture.Exclusive(longPress, doubleTapLike));
 
   const imageStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }],
@@ -141,7 +143,12 @@ export function ImageViewer({ url, onClose }: Props) {
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={close}>
-      <View style={styles.backdrop}>
+      {/*
+        Modal の中身はネイティブの別ビュー階層に出るため、アプリ直下の
+        GestureHandlerRootView の外側になる。ここに置き直さないと
+        タップもピンチも一切届かない。
+      */}
+      <GestureHandlerRootView style={styles.backdrop}>
         <GestureDetector gesture={gesture}>
           <View style={styles.imageArea}>
             <AnimatedImage
@@ -167,7 +174,7 @@ export function ImageViewer({ url, onClose }: Props) {
             <Text style={styles.action}>閉じる</Text>
           </Pressable>
         </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

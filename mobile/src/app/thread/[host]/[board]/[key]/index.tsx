@@ -31,6 +31,7 @@ import { ImageViewer } from '@/components/ImageViewer';
 import { looksSensitive } from '@/filter/sensitive';
 import { anchorTargets, parseBody, segmentsToPlainText, type Segment } from '@/parse/body';
 import { parseDatLine, type Post } from '@/parse/datLine';
+import { decodeEntities } from '@/parse/entities';
 import { DEFAULT_SETTINGS, SETTINGS_KEY, type AppSettings } from '@/settings';
 import { colors, radius, spacing } from '@/theme/colors';
 
@@ -117,7 +118,11 @@ export default function ThreadScreen() {
           setPosts(parsed);
 
           const first = result.lines[0]?.split('<>');
-          const title = first && first.length >= 5 && first[4] ? first[4].trim() : null;
+          // dat の生のスレタイには &#129781; のような文字参照が入る。
+          // subject.txt 側はデコード済みなので、ここで戻さないと
+          // 板一覧と履歴で同じスレのタイトルが食い違う。
+          const title =
+            first && first.length >= 5 && first[4] ? decodeEntities(first[4]).trim() : null;
           if (title) setThreadTitle(title);
           await threadRepo.saveCursor(db, threadRef, result.cursor, { title });
           setStatus(

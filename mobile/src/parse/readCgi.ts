@@ -1,4 +1,5 @@
 import { parseDatLine, type ParsedThread, type Post } from './datLine';
+import { decodeEntities } from './entities';
 
 /**
  * read.cgi の HTML からレスを取り出す。
@@ -40,7 +41,8 @@ function firstGroup(re: RegExp, s: string): string {
 
 /** タグを落として素のテキストにする (日付欄・スレタイ用)。 */
 function plain(s: string): string {
-  return s.replace(/<[^>]*>/g, '').trim();
+  // 文字参照を戻す。戻さないと画面に &#129781; が生で出る。
+  return decodeEntities(s.replace(/<[^>]*>/g, '')).trim();
 }
 
 /**

@@ -63,3 +63,14 @@ describe('toDatNameField', () => {
     expect(toDatNameField('名無し')).toBe('名無し');
   });
 });
+
+describe('文字参照をスレタイで戻す', () => {
+  // 実機で「そこの君&#129781;やめとけ」と生のまま出ていた。
+  // subject.txt 側はデコード済みなので、揃えないと同じスレのタイトルが食い違う。
+  it('h1 の数値文字参照が実体に戻る', () => {
+    const html = '<html><body><h1>そこの君&#129781;やめとけ</h1></body></html>';
+    const { title } = parseReadCgi(html);
+    expect(title).toBe(`そこの君${String.fromCodePoint(129781)}やめとけ`);
+    expect(title).not.toContain('&#');
+  });
+});
