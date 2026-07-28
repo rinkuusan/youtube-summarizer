@@ -73,8 +73,8 @@ export default function ThreadScreen() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   /** 開いた時点の既読数。区切り線が動かないよう、描画中は変えない。 */
   const [readAtOpen, setReadAtOpen] = useState(0);
-  /** ポップアップ表示中の画像 URL。 */
-  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  /** ポップアップ表示中の画像。imageList 内の位置。null で閉じる。 */
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   /** 画像だけを並べるモード。 */
   const [imagesOnly, setImagesOnly] = useState(false);
   /** 高速スクローラ用。リストの実寸と現在位置。 */
@@ -463,6 +463,17 @@ export default function ThreadScreen() {
     [fetchLatest, loading]
   );
 
+  const imageUrls = useMemo(() => imageList.map((i) => i.url), [imageList]);
+
+  /** サムネイルがタップされた。スレ全体の画像一覧での位置に直して開く。 */
+  const openImage = useCallback(
+    (url: string) => {
+      const at = imageUrls.indexOf(url);
+      setViewerIndex(at >= 0 ? at : 0);
+    },
+    [imageUrls]
+  );
+
   const scrollProgress =
     scrollGeom.content > scrollGeom.layout
       ? scrollGeom.offset / (scrollGeom.content - scrollGeom.layout)
@@ -573,7 +584,7 @@ export default function ThreadScreen() {
                 onIdPress={onIdPress}
                 showImages={settings.autoShowImages}
                 blurImages={shouldBlur(item.post)}
-                onImagePress={setViewerUrl}
+                onImagePress={openImage}
                 fontSize={settings.fontSize}
               />
             )
@@ -607,7 +618,7 @@ export default function ThreadScreen() {
             <Text style={styles.gridEmpty}>このスレに画像はありません。</Text>
           }
           renderItem={({ item }) => (
-            <Pressable style={styles.gridCell} onPress={() => setViewerUrl(item.url)}>
+            <Pressable style={styles.gridCell} onPress={() => openImage(item.url)}>
               <Image
                 source={{ uri: item.url }}
                 style={styles.gridImage}
@@ -630,7 +641,11 @@ export default function ThreadScreen() {
         />
       ) : null}
 
-      <ImageViewer url={viewerUrl} onClose={() => setViewerUrl(null)} />
+      <ImageViewer
+        urls={imageUrls}
+        index={viewerIndex}
+        onClose={() => setViewerIndex(null)}
+      />
 
       {/*
         次スレ候補。どれが本物かは題名だけでは決め切れないので、
@@ -727,7 +742,7 @@ export default function ThreadScreen() {
                     onIdPress={onIdPress}
                     showImages={settings.autoShowImages}
                     blurImages={shouldBlur(p)}
-                    onImagePress={setViewerUrl}
+                    onImagePress={openImage}
                     fontSize={settings.fontSize}
                   />
                 ))

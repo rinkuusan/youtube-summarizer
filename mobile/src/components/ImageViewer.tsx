@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { File, Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
@@ -31,12 +31,27 @@ const TAP_SCALE = 2.5;
 const MAX_SCALE = 6;
 
 interface Props {
-  url: string | null;
+  /** スレ内の画像 URL を出てきた順に。横スワイプでこの順に送る。 */
+  urls: string[];
+  /** 表示中の位置。null で閉じる。 */
+  index: number | null;
   onClose: () => void;
 }
 
-export function ImageViewer({ url, onClose }: Props) {
+/** 横フリックと判定する移動量。これ未満は指の震えとみなして戻す。 */
+const SWIPE_THRESHOLD = 70;
+
+export function ImageViewer({ urls, index, onClose }: Props) {
   const [saving, setSaving] = useState(false);
+  const [current, setCurrent] = useState(0);
+
+  // 開かれるたびに位置と拡大率を初期化する。
+  useEffect(() => {
+    if (index === null) return;
+    setCurrent(index);
+  }, [index]);
+
+  const url = index === null ? null : (urls[current] ?? urls[index] ?? null);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -98,16 +113,46 @@ export function ImageViewer({ url, onClose }: Props) {
       savedScale.value = Math.max(scale.value, 1);
     });
 
+  /** 画像を送る。拡大率と位置は毎回リセットする。 */
+  const step = useCallback(
+    (delta: number) => {
+      setCurrent((c) => {
+        const next = c + delta;
+        if (next < 0 || next >= urls.length) return c;
+        return next;
+      });
+      scale.value = 1;
+      savedScale.value = 1;
+      x.value = 0;
+      y.value = 0;
+      savedX.value = 0;
+      savedY.value = 0;
+    },
+    [urls.length, scale, savedScale, x, y, savedX, savedY]
+  );
+
   const pan = Gesture.Pan()
     .onUpdate((e) => {
-      // 等倍のときは動かさない。画面に収まっているので動かす意味が無い。
-      if (savedScale.value <= 1) return;
-      x.value = savedX.value + e.translationX;
-      y.value = savedY.value + e.translationY;
+      if (savedScale.value > 1) {
+        x.value = savedX.value + e.translationX;
+        y.value = savedY.value + e.translationY;
+        return;
+      }
+      // 等倍のときは横に指で追従させる。次の画像へ送る操作の手応えを出すため。
+      x.value = e.translationX;
     })
-    .onEnd(() => {
-      savedX.value = x.value;
-      savedY.value = y.value;
+    .onEnd((e) => {
+      if (savedScale.value > 1) {
+        savedX.value = x.value;
+        savedY.value = y.value;
+        return;
+      }
+      // 等倍での横フリックは画像送り。縦に流れた分が大きいときは送らない。
+      const horizontal =
+        Math.abs(e.translationX) > SWIPE_THRESHOLD &&
+        Math.abs(e.translationX) > Math.abs(e.translationY);
+      if (horizontal) runOnJS(step)(e.translationX < 0 ? 1 : -1);
+      x.value = withTiming(0);
     });
 
   const doubleTapLike = Gesture.Tap().onEnd(() => {
@@ -162,7 +207,11 @@ export function ImageViewer({ url, onClose }: Props) {
 
         <View style={styles.bar}>
           <Text style={styles.hint} numberOfLines={1}>
-            {saving ? '保存中…' : 'タップで拡大 ・ ピンチで拡縮 ・ 長押しで保存'}
+            {saving
+              ? '保存中…'
+              : urls.length > 1
+                ? `${current + 1} / ${urls.length} ・ 横スワイプで送る`
+                : 'タップで拡大 ・ ピンチで拡縮 ・ 長押しで保存'}
           </Text>
           <Pressable onPress={save} hitSlop={10} disabled={saving}>
             <Text style={styles.action}>保存</Text>

@@ -51,6 +51,18 @@ export async function searchThreads(
   for (const term of terms) {
     const url = searchUrl(term);
     const res = await fetchBytes(url, { signal });
+    // find.5ch は本体とは別に落ちることがある。実測 2026-07-29: トップは 200 を
+    // 返すのに /search だけ全クエリで 502。5ch 本体は生きているので、
+    // 「アプリが壊れた」「その単語が弾かれた」と誤解されない文言にする。
+    if (res.status >= 500) {
+      throw new Ch5Error(
+        'server',
+        `5ch のスレタイ検索 (find.5ch) が応答しません (${res.status})。\n` +
+          '5ch 本体は別サーバなので、板やスレの閲覧はそのまま使えます。\n' +
+          '検索語の問題ではないので、時間をおいて試してください。',
+        { status: res.status, url }
+      );
+    }
     if (res.status !== 200) throw errorFromStatus(res.status, url);
 
     const html = new TextDecoder().decode(res.bytes);
