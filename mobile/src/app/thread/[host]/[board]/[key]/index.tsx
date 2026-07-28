@@ -83,6 +83,17 @@ export default function ThreadScreen() {
   const [nextCandidates, setNextCandidates] = useState<NextThreadCandidate[] | null>(null);
   const [nextLoading, setNextLoading] = useState(false);
 
+  /**
+   * 「最新へ」で末尾を追いかけている最中かどうか。
+   *
+   * FlatList は描画済みの行の高さしか知らないので、scrollToEnd を 1 回呼んでも
+   * 「その時点で分かっている末尾」までしか飛べない。飛んだ先で次の行が描画されて
+   * 全体が伸びる、を繰り返すため、数十件ずつ読み込み直しているように見える。
+   * 内容の高さが変わるたびに末尾へ飛び直し、伸びなくなったら止める。
+   */
+  const seekEndRef = useRef(false);
+  const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const cursorRef = useRef<DatCursor>(emptyCursor);
   const listRef = useRef<FlatList<ListItem>>(null);
   const postsRef = useRef<Post[]>([]);
@@ -412,6 +423,46 @@ export default function ThreadScreen() {
     }
   }, [host, board, key, threadTitle, nextLoading]);
 
+  /** 末尾まで確実に飛ばす。伸びが止まるまで追いかける。 */
+  const jumpToEnd = useCallback(() => {
+    seekEndRef.current = true;
+    listRef.current?.scrollToEnd({ animated: false });
+    if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+    // 伸びが止まったとみなすまでの猶予。これを過ぎたら追いかけをやめる。
+    seekTimerRef.current = setTimeout(() => {
+      seekEndRef.current = false;
+    }, 2500);
+  }, []);
+
+  // 画面を離れるときにタイマーを片付ける
+  useEffect(() => {
+    return () => {
+      if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+    };
+  }, []);
+
+  /**
+   * 末尾でさらに上にスワイプしたら新着を取りに行く。
+   *
+   * 引っぱって更新の逆。スレを読み切った所で指を上に払う動きが自然なので、
+   * そこに新着取得を割り当てる。行き過ぎ量がしきい値を超えたら 1 回だけ走らせる。
+   */
+  const pullUpArmedRef = useRef(false);
+  const onOverscrollEnd = useCallback(
+    (overscroll: number) => {
+      if (overscroll < 64 || loading) return;
+      if (pullUpArmedRef.current) return;
+      pullUpArmedRef.current = true;
+      fetchLatest(true).finally(() => {
+        // 指を離して戻ってから、もう一度引けるようにする。
+        setTimeout(() => {
+          pullUpArmedRef.current = false;
+        }, 800);
+      });
+    },
+    [fetchLatest, loading]
+  );
+
   const scrollProgress =
     scrollGeom.content > scrollGeom.layout
       ? scrollGeom.offset / (scrollGeom.content - scrollGeom.layout)
@@ -464,9 +515,12 @@ export default function ThreadScreen() {
       ) : imagesOnly ? null : (
         <View
           style={styles.listWrap}
-          onLayout={(e) =>
-            setScrollGeom((g) => ({ ...g, layout: e.nativeEvent.layout.height }))
-          }>
+          onLayout={(e) => {
+            // 値はここで取り出す。更新関数の中で e を触ると、呼ばれる頃には
+            // イベントが再利用されていて nativeEvent が null になる。
+            const h = e.nativeEvent.layout.height;
+            setScrollGeom((g) => ({ ...g, layout: h }));
+          }}>
         <FlatList
           ref={listRef}
           data={listData}
@@ -477,14 +531,25 @@ export default function ThreadScreen() {
           // 読み込み直しに見える。1 度に描く量を増やして一気に埋める。
           maxToRenderPerBatch={60}
           updateCellsBatchingPeriod={16}
-          onScroll={(e) =>
+          onScrollBeginDrag={() => {
+            seekEndRef.current = false;
+          }}
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             setScrollGeom({
-              offset: e.nativeEvent.contentOffset.y,
-              content: e.nativeEvent.contentSize.height,
-              layout: e.nativeEvent.layoutMeasurement.height,
-            })
-          }
+              offset: contentOffset.y,
+              content: contentSize.height,
+              layout: layoutMeasurement.height,
+            });
+            // 末尾を越えて引っぱられた量。上スワイプでの新着取得に使う。
+            onOverscrollEnd(contentOffset.y + layoutMeasurement.height - contentSize.height);
+          }}
           scrollEventThrottle={32}
+          onContentSizeChange={(_w, h) => {
+            setScrollGeom((g) => ({ ...g, content: h }));
+            // 追いかけ中なら、伸びたぶんだけ末尾へ飛び直す。
+            if (seekEndRef.current) listRef.current?.scrollToEnd({ animated: false });
+          }}
           removeClippedSubviews
           initialScrollIndex={focusIndex > 0 ? focusIndex : dividerIndex > 0 ? dividerIndex : undefined}
           onScrollToIndexFailed={(info) => {
@@ -615,8 +680,7 @@ export default function ThreadScreen() {
         </Pressable>
         <Pressable
           style={styles.buttonGhost}
-          // アニメで飛ぶと途中の行を全部描画しながら進むため、一気に跳ばす。
-          onPress={() => listRef.current?.scrollToEnd({ animated: false })}>
+          onPress={jumpToEnd}>
           <Text style={styles.buttonGhostText}>最新へ</Text>
         </Pressable>
 

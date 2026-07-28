@@ -3,6 +3,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { memo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { log, logError } from '../net/log';
 import type { Segment } from '../parse/body';
 import { colors, radius, spacing } from '../theme/colors';
 
@@ -97,6 +98,10 @@ function Thumb({
         contentFit="cover"
         transition={120}
         blurRadius={hidden ? 60 : 0}
+        cachePolicy="disk"
+        // 読めなかったときに黙って黒い枠が残るだけだと原因が追えない。
+        onError={(e) => logError('image', e?.error ?? e, `サムネイル取得に失敗 ${url}`)}
+        onLoad={() => log('debug', 'image', `サムネイル表示 ${url}`)}
       />
       {hidden ? (
         <View style={styles.veil} pointerEvents="none">

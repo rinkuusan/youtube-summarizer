@@ -42,8 +42,33 @@ function isImageUrl(url: string): boolean {
   return IMAGE_EXT.test(url) || IMAGE_HOST.test(url);
 }
 
+/**
+ * 5ch のリダイレクタを剥がして、本物の URL を取り出す。
+ *
+ * 5ch は外部リンクを `<a href="http://jump5.ch/?https://i.imgur.com/x.jpeg">` の
+ * ように包む。表示テキストだけが本物なので、href をそのまま使うと画像が
+ * リダイレクトページを読みに行って失敗する (しかも http なので Android の
+ * 平文通信ブロックにも掛かる)。
+ *
+ * 形式は 2 通り。
+ *   http://jump5.ch/?https://example.com/x.jpg   … クエリに丸ごと入る新しい形
+ *   http://ime.nu/example.com/x.jpg              … パスに繋げる古い形 (scheme 無し)
+ */
+export function unwrapRedirect(url: string): string {
+  const q = /^https?:\/\/(?:jump\.5ch\.net|jump5\.ch|jump\.2ch\.net|pinktower\.com)\/\?(.+)$/i.exec(url);
+  if (q) return unwrapRedirect(q[1]);
+
+  const p = /^https?:\/\/(?:ime\.nu|ime\.st|jump\.5ch\.net|jump5\.ch)\/(.+)$/i.exec(url);
+  if (p) {
+    const rest = p[1];
+    // 古い形は scheme が落ちているので補う。
+    return unwrapRedirect(/^https?:\/\//i.test(rest) ? rest : `http://${rest}`);
+  }
+  return url;
+}
+
 function urlSegment(url: string): Segment {
-  const clean = trimUrlTail(url);
+  const clean = unwrapRedirect(trimUrlTail(url));
   return isImageUrl(clean) ? { type: 'image', url: clean, text: clean } : { type: 'link', url: clean, text: clean };
 }
 
