@@ -563,7 +563,8 @@
 
       <div id="urlPanel">
         <textarea id="urlInput" rows="4" aria-label="YouTube URL（複数可）" aria-describedby="urlHint" placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/..." autocomplete="off" spellcheck="false"></textarea>
-        <p id="urlHint">1行に1本、最大20本。重複は自動でまとめます。</p>
+        <p id="urlHint">コピー済みのYouTube URLはアプリを開くと自動追加。1行に1本、最大20本。</p>
+        <button type="button" id="pasteNative" class="batch-copy" style="margin-top:0.6rem">📋 コピーしたURLを追加</button>
         <div id="thumbnail"><img id="thumbImg" src="" alt="" /><div class="thumb-title" id="thumbTitle"></div></div>
       </div>
 
@@ -586,7 +587,7 @@
 
       <div class="options-row">
         <div class="seg-group" title="Output mode">
-          <label><input type="radio" name="mode" value="summary" checked /><span>&#128203; &#35201;&#32004;</span></label>
+          <label><input type="radio" name="mode" value="summary" checked /><span>📋 要約</span></label>
           <label><input type="radio" name="mode" value="prompt" /><span>要約用指示文</span></label>
           <label><input type="radio" name="mode" value="transcript" /><span>&#128221; &#20840;&#25991;</span></label>
         </div>
@@ -679,23 +680,35 @@
     const copyAllBtn = document.getElementById('copyAllBtn');
     const stopBatchBtn = document.getElementById('stopBatchBtn');
 
-    // ===== Server wake-up check =====
-    (async function checkServer() {
-      try {
-        const r = await fetch('/health', { signal: AbortSignal.timeout(5000) });
-        if (r.ok) return; // server is awake
-      } catch {}
-      // Server sleeping - show overlay and poll
-      wakeOverlay.classList.add('visible');
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        try {
-          const r = await fetch('/health', { signal: AbortSignal.timeout(5000) });
-          if (r.ok) { wakeOverlay.classList.remove('visible'); return; }
-        } catch {}
+    // APK-only foreground clipboard adapter. No network request is made here.
+    window.importYouTubeUrls = function(urls) {
+      if (processing || !Array.isArray(urls)) return false;
+      const existing = urlInput.value.trim().split(/\s+/).filter(Boolean);
+      const ids = new Set(existing.map(extractVideoId).filter(Boolean));
+      const additions = urls.filter(url => { const id = extractVideoId(url); if (!id || ids.has(id)) return false; ids.add(id); return true; });
+      if (existing.length + additions.length > 20) {
+        if (!window.apkOverflowShown) showError('URL欄が20本を超えます。追加分は待機中です。先に入力欄を整理してください。');
+        window.apkOverflowShown = true;
+        return false;
       }
-      wakeOverlay.classList.remove('visible');
-    })();
+      window.apkOverflowShown = false;
+      if (!additions.length) return true;
+      urlInput.value = existing.concat(additions).join('\n');
+      activeTab = 'url';
+      sourceTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === 'url'));
+      urlPanel.style.display = ''; filePanel.classList.remove('active');
+      urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      showToast(additions.length + '本のURLを追加しました');
+      return true;
+    };
+    document.getElementById('pasteNative').addEventListener('click', () => { if (!processing) AndroidClipboard.paste(); });
+    const apkClipboard = { writeText: async text => { AndroidClipboard.copy(String(text)); } };
+    Object.defineProperty(navigator, 'clipboard', { value: apkClipboard, configurable: true });
+    try { urlInput.value = localStorage.getItem('youtube_url_draft') || ''; } catch {}
+    urlInput.addEventListener('input', () => { try { localStorage.setItem('youtube_url_draft', urlInput.value); } catch {} });
+
+    // Wake the API without hiding the offline-ready input screen.
+    fetch('/health', { signal: AbortSignal.timeout(10000) }).catch(() => {});
 
     // Restore
     groqKeyInput.value = localStorage.getItem('groq_api_key') || '';

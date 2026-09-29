@@ -3,3 +3,9 @@ __pycache__/
 .env
 logs/
 *.log
+
+android/build/
+android/out/
+*.jks
+*.keystore
+.pytest_cache/

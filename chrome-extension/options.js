@@ -1,0 +1,4 @@
+const $=id=>document.getElementById(id);
+(async()=>{const {settings={auto:true,language:'auto',supadataKey:''}}=await chrome.storage.local.get('settings'); $('auto').checked=settings.auto; $('language').value=settings.language; $('key').value=settings.supadataKey;})();
+$('save').onclick=async()=>{try{await chrome.storage.local.set({settings:{auto:$('auto').checked,language:$('language').value,supadataKey:$('key').value.trim()}}); $('status').textContent='保存しました。';}catch{$('status').textContent='保存に失敗しました。';}};
+$('unlock').onclick=async()=>{if(!confirm('利用状況を確認しましたか？解除後の再取得では追加でクレジットを消費する可能性があります。'))return; const all=await chrome.storage.local.get(null); const names=Object.keys(all).filter(name=>name.startsWith('job:') && all[name].kind==='supadata' && (all[name].error || (!all[name].jobId && Date.now()-all[name].startedAt>60000))); await chrome.storage.local.remove(names); $('status').textContent=names.length+'件の未確定状態を解除しました。';};

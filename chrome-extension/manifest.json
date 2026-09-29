@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "動画ノート — YouTube全文字幕",
+  "version": "1.0.0",
+  "minimum_chrome_version": "120",
+  "description": "手動または実視聴3分で全文字幕を取得。全文表示・コピー・TXT保存。",
+  "permissions": ["storage", "scripting", "notifications", "alarms"],
+  "host_permissions": ["https://www.youtube.com/*", "https://api.supadata.ai/*"],
+  "background": {"service_worker": "worker.js"},
+  "action": {"default_title": "動画ノートの設定", "default_popup": "options.html"},
+  "options_page": "options.html",
+  "icons": {"128": "icon.png"},
+  "content_scripts": [{"matches": ["https://www.youtube.com/*"], "js": ["core.js", "content.js"], "run_at": "document_idle"}]
+}
