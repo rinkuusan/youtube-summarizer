@@ -118,7 +118,7 @@
     }
 
     /* ===== URL Panel ===== */
-    #urlPanel input {
+    #urlPanel textarea {
       width: 100%;
       background: var(--bg);
       border: 1px solid var(--border);
@@ -129,11 +129,11 @@
       outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-    #urlPanel input:focus {
+    #urlPanel textarea:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(124,108,255,0.15);
     }
-    #urlPanel input::placeholder { color: var(--text-dim); }
+    #urlPanel textarea::placeholder { color: var(--text-dim); }
 
     /* ===== File Panel ===== */
     #filePanel { display: none; flex-direction: column; gap: 0.6rem; }
@@ -516,7 +516,7 @@
       .source-tab { padding: 0.65rem 0.8rem; font-size: 0.88rem; }
       button#submitBtn { padding: 1rem; font-size: 1.05rem; border-radius: 14px; }
       .drop-zone { padding: 2.5rem 1rem; }
-      #urlPanel input { padding: 0.85rem 1rem; font-size: 1rem; }
+      #urlPanel textarea { padding: 0.85rem 1rem; font-size: 1rem; }
       header h1 { font-size: 1.4rem; }
       .result-toolbar { flex-wrap: wrap; padding: 0.5rem 0.75rem; }
       .result-toolbar button { padding: 0.5rem 1rem; font-size: 0.88rem; flex: 1; text-align: center; }
@@ -524,6 +524,25 @@
       .drop-mobile { display: inline; }
       .drop-desktop { display: none; }
     }
+    #urlPanel textarea { resize: vertical; min-height: 112px; font-family: var(--font); line-height: 1.6; }
+    #urlHint { color: var(--text-dim); font-size: 0.8rem; margin-top: 0.45rem; }
+    #batchBox { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+    #batchList { display: flex; flex-direction: column; }
+    .batch-item { border-top: 1px solid var(--border); padding: 1rem; min-width: 0; }
+    .batch-item:first-child { border-top: 0; }
+    .batch-heading { display: flex; align-items: flex-start; gap: 0.6rem; flex-wrap: wrap; }
+    .batch-link { flex: 1; min-width: 160px; color: var(--accent-h); font-size: 0.85rem; overflow-wrap: anywhere; }
+    .batch-state { color: var(--text-dim); font-size: 0.8rem; }
+    .batch-item[data-state="error"] .batch-state { color: var(--error); }
+    .batch-item[data-state="done"] .batch-state { color: var(--success); }
+    .batch-error { color: var(--error); font-size: 0.85rem; margin-top: 0.6rem; overflow-wrap: anywhere; }
+    .batch-copy { border: 1px solid var(--border); border-radius: 6px; background: var(--surface2); color: var(--text); padding: 0.35rem 0.7rem; cursor: pointer; }
+    .batch-output { margin-top: 0.7rem; }
+    .batch-output summary { color: var(--accent-h); cursor: pointer; font-size: 0.9rem; }
+    .batch-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow-y: auto; font-size: 0.95rem; line-height: 1.8; padding-top: 0.75rem; }
+    .result-toolbar button:disabled { opacity: 0.4; cursor: default; }
+    [hidden] { display: none !important; }
+    button:focus-visible, .source-tab:focus-visible, summary:focus-visible { outline: 2px solid var(--accent-h); outline-offset: 3px; }
   </style>
 </head>
 <body>
@@ -543,7 +562,8 @@
       </div>
 
       <div id="urlPanel">
-        <input type="text" id="urlInput" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" spellcheck="false" />
+        <textarea id="urlInput" rows="4" aria-label="YouTube URL（複数可）" aria-describedby="urlHint" placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/..." autocomplete="off" spellcheck="false"></textarea>
+        <p id="urlHint">1行に1本、最大20本。重複は自動でまとめます。</p>
         <div id="thumbnail"><img id="thumbImg" src="" alt="" /><div class="thumb-title" id="thumbTitle"></div></div>
       </div>
 
@@ -578,11 +598,16 @@
 
       <div class="api-key-section">
         <input type="password" id="groqKeyInput" placeholder="Groq API Key (gsk_...)" autocomplete="off" spellcheck="false" />
-        <span class="api-key-hint">&#128274; &#12461;&#12540;&#12399;&#12502;&#12521;&#12454;&#12470;&#12395;&#12398;&#12415;&#20445;&#23384;&#65288;&#12469;&#12540;&#12496;&#12540;&#12395;&#12399;&#36865;&#20449;&#12373;&#12428;&#12414;&#12379;&#12435;&#65289;</span>
+        <span class="api-key-hint">🔒 キーはこのブラウザに保存され、文字起こし時にサーバーへ送信されます。</span>
       </div>
 
       <button id="submitBtn">&#9889; Generate</button>
     </div>
+
+    <section id="batchBox" hidden aria-label="動画ごとの処理結果">
+      <div class="result-toolbar"><span id="batchLabel" aria-live="polite">処理待ち</span><button id="copyAllBtn" disabled>📋 全件コピー</button><button id="stopBatchBtn" hidden>以降を停止</button></div>
+      <div id="batchList"></div>
+    </section>
 
     <div id="statusBox">
       <div class="status-line">
@@ -642,6 +667,14 @@
     let currentRawText = '';
     let selectedFile   = null;
     let activeTab      = 'url';
+    let processing = false;
+    let stopRequested = false;
+    let batchItems = [];
+    const batchBox = document.getElementById('batchBox');
+    const batchLabel = document.getElementById('batchLabel');
+    const batchList = document.getElementById('batchList');
+    const copyAllBtn = document.getElementById('copyAllBtn');
+    const stopBatchBtn = document.getElementById('stopBatchBtn');
 
     // ===== Server wake-up check =====
     (async function checkServer() {
@@ -668,15 +701,37 @@
     });
 
     // ===== Thumbnail preview =====
-    function extractVideoId(url) {
-      const m = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
-      return m ? m[1] : null;
+    function extractVideoId(input) {
+      try {
+        const url = new URL(input);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+        const host = url.hostname.toLowerCase();
+        let id = '';
+        if (host === 'youtu.be') id = url.pathname.split('/')[1];
+        else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(host)) {
+          id = url.pathname === '/watch' ? url.searchParams.get('v') : /^\/(shorts|live|embed)\//.test(url.pathname) ? url.pathname.split('/')[2] : '';
+        }
+        return /^[A-Za-z0-9_-]{11}$/.test(id || '') ? id : null;
+      } catch { return null; }
+    }
+    function parseVideoUrls(value) {
+      const entries = value.trim().split(/\s+/).filter(Boolean);
+      if (!entries.length) throw new Error('YouTube URLを入力してください。');
+      const ids = new Set();
+      for (const entry of entries) {
+        const id = extractVideoId(entry);
+        if (!id) throw new Error('動画URLを確認してください：' + entry);
+        ids.add(id);
+      }
+      if (ids.size > 20) throw new Error('一度に処理できるのは20本までです。');
+      return [...ids].map(id => 'https://www.youtube.com/watch?v=' + id);
     }
     let thumbDebounce = null;
     urlInput.addEventListener('input', () => {
       clearTimeout(thumbDebounce);
       thumbDebounce = setTimeout(() => {
-        const vid = extractVideoId(urlInput.value.trim());
+        const entries = urlInput.value.trim().split(/\s+/).filter(Boolean);
+        const vid = entries.length === 1 ? extractVideoId(entries[0]) : null;
         if (vid) {
           thumbImg.src = 'https://img.youtube.com/vi/' + vid + '/mqdefault.jpg';
           thumbImg.onerror = () => thumbnail.classList.remove('visible');
@@ -702,6 +757,7 @@
     // Tab switching
     sourceTabs.forEach(tab => {
       tab.addEventListener('click', () => {
+        if (processing) return;
         activeTab = tab.dataset.tab;
         sourceTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === activeTab));
         urlPanel.style.display = activeTab === 'url' ? '' : 'none';
@@ -719,12 +775,14 @@
     fileInput.addEventListener('change', () => { if (fileInput.files[0]) setSelectedFile(fileInput.files[0]); });
 
     function setSelectedFile(f) {
+      if (processing) return;
       selectedFile = f;
       fileName.textContent = f.name;
       fileSize.textContent = fmtSize(f.size);
       fileInfo.classList.add('visible');
     }
     fileClearBtn.addEventListener('click', () => {
+      if (processing) return;
       selectedFile = null; fileInput.value = ''; fileInfo.classList.remove('visible');
     });
 
@@ -748,7 +806,7 @@
 
     // Markdown-like rendering
     function renderMarkdown(text) {
-      const lines = text.split('\n');
+      const lines = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').split('\n');
       let html = '';
       let inList = false;
 
@@ -802,67 +860,140 @@
       }
     });
 
-    // SSE reader
-    async function readSSE(response, mode) {
+    // Consume fragmented SSE, including a final event without a newline.
+    async function readSSE(response, handlers) {
+      if (!response.body) throw new Error('結果の受信を開始できませんでした。');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6).trim();
-          if (!payload) continue;
-          let ev;
-          try { ev = JSON.parse(payload); } catch { continue; }
-          if      (ev.type === 'status')   setStatus(ev.message);
-          else if (ev.type === 'progress') setProgress(ev.value);
-          else if (ev.type === 'result')   showResult(ev.text, mode);
-          else if (ev.type === 'error')    showError(ev.message);
+      let buffer = '', result = null;
+      function consume(line) {
+        if (!line.startsWith('data:')) return;
+        let event;
+        try { event = JSON.parse(line.slice(5).trim()); } catch { return; }
+        if (event.type === 'status') handlers.status(event.message);
+        else if (event.type === 'progress') handlers.progress(event.value);
+        else if (event.type === 'error') throw new Error(event.message || '処理に失敗しました。');
+        else if (event.type === 'result') {
+          if (typeof event.text !== 'string' || !event.text.trim()) throw new Error('結果が空でした。');
+          result = event.text;
         }
       }
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n'); buffer = lines.pop();
+          for (const line of lines) consume(line.replace(/\r$/, ''));
+          if (done) { if (buffer) consume(buffer); break; }
+        }
+        if (result === null) throw new Error('結果を受け取る前に接続が終了しました。再実行してください。');
+        return result;
+      } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     }
 
-    // Submit
-    submitBtn.addEventListener('click', startProcess);
-    urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') startProcess(); });
-
-    async function startProcess() {
-      const mode = getMode(), language = getLanguage(), groqApiKey = groqKeyInput.value.trim();
-      submitBtn.disabled = true;
-      submitBtn.classList.add('loading');
-      try {
-        if (activeTab === 'url') {
-          const url = urlInput.value.trim();
-          if (!url) { urlInput.focus(); return; }
-          showStatus('\u63a5\u7d9a\u4e2d...');
+    function setBusy(value) {
+      processing = value;
+      submitBtn.disabled = value;
+      submitBtn.classList.toggle('loading', value);
+      urlInput.disabled = value; groqKeyInput.disabled = value;
+      fileInput.disabled = value; fileClearBtn.disabled = value;
+      document.querySelectorAll('input[name="mode"], input[name="language"]').forEach(input => input.disabled = value);
+      sourceTabs.forEach(tab => tab.setAttribute('aria-disabled', String(value)));
+    }
+    function setBatchState(item, state, text) {
+      item.state = state; item.card.dataset.state = state; item.status.textContent = text;
+    }
+    function updateBatchLabel() {
+      const success = batchItems.filter(item => item.state === 'done').length;
+      const failed = batchItems.filter(item => item.state === 'error').length;
+      const stopped = batchItems.filter(item => item.state === 'stopped').length;
+      batchLabel.textContent = success + '/' + batchItems.length + '本 完了' + (failed ? '・' + failed + '本 失敗' : '') + (stopped ? '・' + stopped + '本 未処理' : '');
+      copyAllBtn.disabled = !success;
+    }
+    async function copyText(text) {
+      try { await navigator.clipboard.writeText(text); showToast('✅ コピーしました'); }
+      catch { showToast('コピーできませんでした。本文を選択してコピーしてください。'); }
+    }
+    function makeBatchItem(url, index) {
+      const card = document.createElement('article'); card.className = 'batch-item';
+      const heading = document.createElement('div'); heading.className = 'batch-heading';
+      const link = document.createElement('a'); link.className = 'batch-link'; link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = (index + 1) + '. ' + url;
+      const status = document.createElement('span'); status.className = 'batch-state'; status.setAttribute('aria-live', 'polite');
+      const copy = document.createElement('button'); copy.className = 'batch-copy'; copy.textContent = 'Copy'; copy.disabled = true;
+      const output = document.createElement('details'); output.className = 'batch-output'; output.hidden = true;
+      const label = document.createElement('summary');
+      const body = document.createElement('div'); body.className = 'batch-text';
+      const error = document.createElement('p'); error.className = 'batch-error'; error.hidden = true;
+      heading.append(link, status, copy); output.append(label, body); card.append(heading, error, output); batchList.append(card);
+      const item = { url, card, status, copy, output, label, body, error, text: '', state: 'waiting' };
+      copy.addEventListener('click', () => copyText(item.url + '\n\n' + item.text));
+      setBatchState(item, 'waiting', '待機中'); return item;
+    }
+    copyAllBtn.addEventListener('click', () => copyText(batchItems.filter(item => item.state === 'done').map(item => item.url + '\n\n' + item.text).join('\n\n---\n\n')));
+    stopBatchBtn.addEventListener('click', () => {
+      stopRequested = true; stopBatchBtn.disabled = true; stopBatchBtn.textContent = '現在の動画が終わったら停止';
+    });
+    async function checkResponse(res) {
+      if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Server error' })); throw new Error(typeof err.detail === 'string' ? err.detail : 'HTTP ' + res.status); }
+    }
+    async function processBatch(urls, mode, language, groqApiKey) {
+      batchBox.hidden = false; batchList.replaceChildren();
+      batchItems = urls.map(makeBatchItem); updateBatchLabel();
+      stopRequested = false; stopBatchBtn.hidden = false; stopBatchBtn.disabled = false; stopBatchBtn.textContent = '以降を停止';
+      for (let index = 0; index < batchItems.length; index++) {
+        const item = batchItems[index];
+        if (stopRequested) { setBatchState(item, 'stopped', '未処理'); continue; }
+        setBatchState(item, 'running', '処理中');
+        const prefix = (index + 1) + '/' + batchItems.length + '本目：';
+        setStatus(prefix + '接続中...'); setProgress(-1);
+        try {
           const res = await fetch('/process', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, mode, language, engine: 'groq', groq_api_key: groqApiKey }),
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: item.url, mode, language, engine: 'groq', groq_api_key: groqApiKey }),
           });
-          if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Server error' })); throw new Error(err.detail || 'HTTP ' + res.status); }
-          await readSSE(res, mode);
+          await checkResponse(res);
+          item.text = await readSSE(res, { status: msg => setStatus(prefix + msg), progress: setProgress });
+          item.body.textContent = item.text;
+          item.label.textContent = (mode === 'prompt' ? '要約用プロンプト' : '全文') + '（' + item.text.length.toLocaleString() + '文字）';
+          item.output.hidden = false; item.output.open = true; item.copy.disabled = false;
+          setBatchState(item, 'done', '完了');
+        } catch (error) {
+          item.error.textContent = error.message || '通信に失敗しました。'; item.error.hidden = false;
+          setBatchState(item, 'error', '失敗');
+        }
+        updateBatchLabel();
+      }
+      updateBatchLabel(); stopBatchBtn.hidden = true; statusBox.classList.remove('visible');
+    }
+
+    submitBtn.addEventListener('click', startProcess);
+    urlInput.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); startProcess(); } });
+    async function startProcess() {
+      if (processing) return;
+      const mode = getMode(), language = getLanguage(), groqApiKey = groqKeyInput.value.trim();
+      let urls;
+      if (activeTab === 'url') {
+        try { urls = parseVideoUrls(urlInput.value); }
+        catch (err) { showError(err.message); urlInput.focus(); return; }
+      } else if (!selectedFile) { showError('ファイルを選択してください。'); return; }
+      setBusy(true);
+      try {
+        showStatus('接続中...');
+        if (activeTab === 'url') {
+          await processBatch(urls, mode, language, groqApiKey);
         } else {
-          if (!selectedFile) { showError('\u30d5\u30a1\u30a4\u30eb\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044\u3002'); return; }
-          showStatus(selectedFile.name + ' \u3092\u30a2\u30c3\u30d7\u30ed\u30fc\u30c9\u4e2d...');
+          batchBox.hidden = true;
+          showStatus(selectedFile.name + ' をアップロード中...');
           const fd = new FormData();
           fd.append('file', selectedFile); fd.append('mode', mode); fd.append('language', language);
           fd.append('engine', 'groq'); fd.append('groq_api_key', groqApiKey);
           const res = await fetch('/process-file', { method: 'POST', body: fd });
-          if (!res.ok) { const err = await res.json().catch(() => ({ detail: 'Server error' })); throw new Error(err.detail || 'HTTP ' + res.status); }
-          await readSSE(res, mode);
+          await checkResponse(res);
+          const text = await readSSE(res, { status: setStatus, progress: setProgress });
+          showResult(text, mode);
         }
-      } catch (err) {
-        showError(err.message || 'Unknown error');
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.classList.remove('loading');
-      }
+      } catch (err) { showError(err.message || 'Unknown error'); }
+      finally { setBusy(false); stopBatchBtn.hidden = true; }
     }
   </script>
 </body>
