@@ -23,5 +23,5 @@ Run-Checked "$bt\d8.bat" (@('--lib',$platform,'--min-api','26','--output','build
 Copy-Item 'build/resources.apk' 'build/unsigned.apk' -Force
 Run-Checked "$Jdk\bin\jar.exe" @('uf','build/unsigned.apk','-C','build/dex','classes.dex')
 Run-Checked "$bt\zipalign.exe" @('-f','-p','4','build/unsigned.apk','build/aligned.apk')
-Run-Checked "$bt\apksigner.bat" @('sign','--ks',$env:APK_KEYSTORE,'--ks-key-alias','video-notes','--ks-pass','env:APK_KEY_PASSWORD','--key-pass','env:APK_KEY_PASSWORD','--out','out/video-notes-1.2.0.apk','build/aligned.apk')
-Run-Checked "$bt\apksigner.bat" @('verify','--verbose','out/video-notes-1.2.0.apk')
+Run-Checked "$bt\apksigner.bat" @('sign','--ks',$env:APK_KEYSTORE,'--ks-key-alias','video-notes','--ks-pass','env:APK_KEY_PASSWORD','--key-pass','env:APK_KEY_PASSWORD','--out','out/video-notes-1.2.1.apk','build/aligned.apk')
+Run-Checked "$bt\apksigner.bat" @('verify','--verbose','out/video-notes-1.2.1.apk')
