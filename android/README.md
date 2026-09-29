@@ -1,4 +1,4 @@
-# 動画ノート Android 1.1.0
+# 動画ノート Android 1.2.0
 
 YouTube Summarizerの複数URL版を内蔵した、Android 8以降向けアプリです。
 
@@ -30,10 +30,14 @@ JDK 17、Android Platform 35、Build Tools 35.0.0を使用。Gradleと外部Andr
 署名鍵のaliasは `video-notes`。鍵はソースには含めず、別の署名バックアップに保存しています。
 今後の更新にも同じ鍵を使ってください。
 
-Windowsでは `build.ps1` を使います。`APK_KEYSTORE` と `APK_KEY_PASSWORD` は環境変数として指定し、ソースやコマンド引数には秘密値を保存しません。既定はAndroid Studio付属JDK、SDK Build Tools 35.0.0、Platform35です。versionCodeは2に更新済み。ビルド出力は `out/video-notes-1.1.0.apk` です。
+Windowsでは `build.ps1` を使います。`APK_KEYSTORE` と `APK_KEY_PASSWORD` は環境変数として指定し、ソースやコマンド引数には秘密値を保存しません。既定はAndroid Studio付属JDK、SDK Build Tools 35.0.0、Platform35です。versionCodeは3に更新済み。ビルド出力は `out/video-notes-1.2.0.apk` です。
 
 全文TXT保存はAndroidの「名前を付けて保存」画面で保存先を選びます。外部ストレージの広範な権限は要求しません。
 
 ## 検証範囲
 Javaコンパイル、APK署名・アーカイブ構造、URL抽出、共有テキスト、重複除外、JSの複数処理と自動追加を確認。
 Android実機へのインストール・共有メニュー・クリップボード動作は未確認です。
+
+## 共有
+
+結果の「全件共有」は完了した動画のURLと本文をまとめてAndroid共有メニューに渡します。各動画と音声結果にも「共有」があります。ChatGPTなど表示されたアプリを選んでください。6万文字を超える場合は本文を切り捨てずUTF-8のTXTファイルとして共有します。添付の受け取り可否は共有先アプリによります。共有先での送信は利用者が行います。

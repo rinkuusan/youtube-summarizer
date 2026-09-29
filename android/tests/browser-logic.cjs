@@ -2,8 +2,8 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 class Element {
-  constructor(){ this.value=''; this.children=[]; this.dataset={}; this.disabled=false; this.hidden=false; this.style={}; this.classList={add(){},remove(){},toggle(){}}; }
-  dispatchEvent(){} addEventListener(){} setAttribute(){} focus(){} append(...items){this.children.push(...items)} replaceChildren(){this.children=[]}
+  constructor(){ this.listeners={}; this.value=''; this.children=[]; this.dataset={}; this.disabled=false; this.hidden=false; this.style={}; this.classList={add(){},remove(){},toggle(){}}; }
+  dispatchEvent(){} addEventListener(name,fn){this.listeners[name]=fn;} setAttribute(){} focus(){} append(...items){this.children.push(...items)} replaceChildren(){this.children=[]}
 }
 const elements=new Map(); const element=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id)};
 const context=vm.createContext({console,URL,Set,TextDecoder,TextEncoder,Response,ReadableStream,AbortSignal,FormData,Blob,setTimeout,clearTimeout,document:{getElementById:element,querySelector:selector=>({value:selector.includes('mode')?'transcript':'auto'}),querySelectorAll:()=>[],createElement:()=>new Element()},localStorage:{getItem:()=>'',setItem:()=>{}},navigator:{clipboard:{writeText:async()=>{}}},fetch:async()=>new Response('{}')});
@@ -38,5 +38,17 @@ function stream(events,tail=false){ const bytes=new TextEncoder().encode(': keep
   assert.equal(run("urlInput.value.split('\\n').length"),2);
   run("processing=false; urlInput.value=Array.from({length:20},(_,i)=>'https://youtu.be/'+String(i).padStart(11,'0')).join('\\n')");
   assert.equal(run("window.importYouTubeUrls(['https://youtu.be/ccccccccccc'])"),false);
+  const shared=[]; context.AndroidClipboard.share=text=>shared.push(text);
+  context.fetch=async()=>stream([{type:'result',text:'共有する本文🙂'}]);
+  await run("processBatch(['https://youtu.be/aaaaaaaaaaa','https://youtu.be/bbbbbbbbbbb'],'transcript','ja','')");
+  assert.equal(run('shareAllBtn.disabled'),false);
+  run("shareAllBtn.listeners.click()");
+  assert.equal(shared[0],'https://youtu.be/aaaaaaaaaaa\n\n共有する本文🙂\n\n---\n\nhttps://youtu.be/bbbbbbbbbbb\n\n共有する本文🙂');
+  run('batchItems[1].share.listeners.click()'); assert.equal(shared[1],'https://youtu.be/bbbbbbbbbbb\n\n共有する本文🙂');
+  run("batchItems[1].state='error'; shareAllBtn.listeners.click()"); assert.ok(!shared[2].includes('bbbbbbbbbbb'));
+  run("currentRawText='音声結果'; document.getElementById('shareResultBtn').listeners.click()"); assert.equal(shared[3],'音声結果');
+  run("shareText('')"); assert.equal(shared.length,4);
+  const longText='長文🙂'.repeat(80000); context.longText=longText; run('shareText(longText)'); assert.equal(shared[4],longText);
+  console.log('PASS: sharing all/single/audio, exclude failed, preserve long text.');
   console.log('PASS: native import append/dedup/busy deferral/overflow; URL normalization/deduplication/limit; fragmented SSE and missing result; 3-video batch continues after failure; plain-text safety; stop after current; audio upload regression.');
 })().catch(e=>{console.error(e);process.exitCode=1});

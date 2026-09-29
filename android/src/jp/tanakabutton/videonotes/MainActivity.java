@@ -131,6 +131,41 @@ public final class MainActivity extends Activity {
         });
     }
     private final class ClipboardBridge {
+        @JavascriptInterface public void share(String text) {
+            if (text == null || text.trim().isEmpty()) return;
+            handler.post(() -> {
+                if (!focused || !loaded || !HOME.equals(web.getUrl())) return;
+                new Thread(() -> {
+                    try {
+                        Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain");
+                        send.putExtra(Intent.EXTRA_SUBJECT, "動画ノート");
+                        // Large Binder extras can fail: attach the complete UTF-8 text instead.
+                        if (text.length() <= 60000) {
+                            send.putExtra(Intent.EXTRA_TEXT, text);
+                        } else {
+                            java.io.File dir = new java.io.File(getCacheDir(), "shared-notes");
+                            if (!dir.isDirectory() && !dir.mkdirs()) throw new java.io.IOException("Cannot create share directory");
+                            String name = java.util.UUID.randomUUID().toString() + ".txt";
+                            try (java.io.FileOutputStream out = new java.io.FileOutputStream(new java.io.File(dir, name))) {
+                                out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                            }
+                            Uri uri = new Uri.Builder().scheme("content").authority(getPackageName() + ".sharednotes").appendPath(name).build();
+                            send.putExtra(Intent.EXTRA_STREAM, uri);
+                            send.putExtra(Intent.EXTRA_TEXT, "動画ノートの全文をTXTファイルに添付しました。");
+                            send.setClipData(ClipData.newUri(getContentResolver(), "動画ノート全文", uri));
+                            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        }
+                        handler.post(() -> {
+                            if (isFinishing() || isDestroyed() || !focused || !loaded || !HOME.equals(web.getUrl())) return;
+                            try { startActivity(Intent.createChooser(send, "動画ノートを共有")); }
+                            catch (Exception e) { Toast.makeText(MainActivity.this,"共有先を開けませんでした。コピーまたはTXT保存を使ってください",Toast.LENGTH_LONG).show(); }
+                        });
+                    } catch (Exception e) {
+                        handler.post(() -> Toast.makeText(MainActivity.this,"共有の準備に失敗しました。TXT保存を使ってください",Toast.LENGTH_LONG).show());
+                    }
+                }, "share-notes").start();
+            });
+        }
         @JavascriptInterface public void save(String name, String text) {
             if (text == null || text.length() > 3000000) return;
             handler.post(() -> {

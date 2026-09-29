@@ -19,5 +19,5 @@ cp build/resources.apk build/unsigned.apk
 : "${APK_KEYSTORE:?Set APK_KEYSTORE to the signing keystore path}"
 : "${APK_KEY_ALIAS:=video-notes}"
 : "${APK_KEY_PASSWORD:?Set APK_KEY_PASSWORD to the keystore password}"
-"$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$APK_KEYSTORE" --ks-key-alias "$APK_KEY_ALIAS" --ks-pass env:APK_KEY_PASSWORD --key-pass env:APK_KEY_PASSWORD --out out/video-notes-1.0.0.apk build/aligned.apk
-"$ANDROID_BUILD_TOOLS/apksigner" verify --verbose out/video-notes-1.0.0.apk
+"$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$APK_KEYSTORE" --ks-key-alias "$APK_KEY_ALIAS" --ks-pass env:APK_KEY_PASSWORD --key-pass env:APK_KEY_PASSWORD --out out/video-notes-1.2.0.apk build/aligned.apk
+"$ANDROID_BUILD_TOOLS/apksigner" verify --verbose out/video-notes-1.2.0.apk

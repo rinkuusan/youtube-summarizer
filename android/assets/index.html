@@ -607,7 +607,7 @@
     </div>
 
     <section id="batchBox" hidden aria-label="動画ごとの処理結果">
-      <div class="result-toolbar"><span id="batchLabel" aria-live="polite">処理待ち</span><button id="copyAllBtn" disabled>📋 全件コピー</button><button id="stopBatchBtn" hidden>以降を停止</button></div>
+      <div class="result-toolbar"><span id="batchLabel" aria-live="polite">処理待ち</span><button id="copyAllBtn" disabled>📋 全件コピー</button><button id="shareAllBtn" disabled>全件共有</button><button id="stopBatchBtn" hidden>以降を停止</button></div>
       <div id="batchList"></div>
     </section>
 
@@ -629,7 +629,7 @@
     <div id="resultBox">
       <div class="result-toolbar">
         <span id="resultLabel">Result</span>
-        <button id="copyBtn">&#128203; Copy</button>
+        <button id="shareResultBtn">共有</button><button id="copyBtn">&#128203; Copy</button>
       </div>
       <div id="resultContent"></div>
     </div>
@@ -677,6 +677,7 @@
     const batchBox = document.getElementById('batchBox');
     const batchLabel = document.getElementById('batchLabel');
     const batchList = document.getElementById('batchList');
+    const shareAllBtn = document.getElementById('shareAllBtn');
     const copyAllBtn = document.getElementById('copyAllBtn');
     const stopBatchBtn = document.getElementById('stopBatchBtn');
 
@@ -971,8 +972,19 @@
       const failed = batchItems.filter(item => item.state === 'error').length;
       const stopped = batchItems.filter(item => item.state === 'stopped').length;
       batchLabel.textContent = success + '/' + batchItems.length + '本 完了' + (failed ? '・' + failed + '本 失敗' : '') + (stopped ? '・' + stopped + '本 未処理' : '');
-      copyAllBtn.disabled = !success;
+      copyAllBtn.disabled = !success; shareAllBtn.disabled = !success;
     }
+    function shareText(text) {
+      if (!text || !text.trim()) return;
+      if (window.AndroidClipboard && typeof AndroidClipboard.share === 'function') {
+        AndroidClipboard.share(text);
+      } else { showToast('共有を利用できません。アプリを更新するかコピーを使ってください。'); }
+    }
+    function completedBatchText() {
+      return batchItems.filter(item => item.state === 'done').map(item => item.url + '\n\n' + item.text).join('\n\n---\n\n');
+    }
+    shareAllBtn.addEventListener('click', () => shareText(completedBatchText()));
+    document.getElementById('shareResultBtn').addEventListener('click', () => shareText(currentRawText));
     async function copyText(text) {
       try { await navigator.clipboard.writeText(text); showToast('✅ コピーしました'); }
       catch { showToast('コピーできませんでした。本文を選択してコピーしてください。'); }
@@ -982,6 +994,7 @@
       const heading = document.createElement('div'); heading.className = 'batch-heading';
       const link = document.createElement('a'); link.className = 'batch-link'; link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = (index + 1) + '. ' + url;
       const status = document.createElement('span'); status.className = 'batch-state'; status.setAttribute('aria-live', 'polite');
+      const share = document.createElement('button'); share.className = 'batch-copy'; share.textContent = '共有'; share.disabled = true;
       const copy = document.createElement('button'); copy.className = 'batch-copy'; copy.textContent = 'Copy'; copy.disabled = true;
       const output = document.createElement('details'); output.className = 'batch-output'; output.hidden = true;
       const label = document.createElement('summary');
@@ -991,9 +1004,10 @@
       const original = document.createElement('details'); original.hidden = true;
       const originalLabel = document.createElement('summary'); originalLabel.textContent = '取得した全文';
       const originalBody = document.createElement('div'); originalBody.className = 'batch-text'; original.append(originalLabel, originalBody);
-      heading.append(link, status, copy, save); output.append(label, body); card.append(heading, error, output, original); batchList.append(card);
-      const item = { url, card, status, copy, output, label, body, error, save, original, originalBody, transcript: '', text: '', state: 'waiting' };
+      heading.append(link, status, copy, share, save); output.append(label, body); card.append(heading, error, output, original); batchList.append(card);
+      const item = { url, card, status, copy, share, output, label, body, error, save, original, originalBody, transcript: '', text: '', state: 'waiting' };
       save.addEventListener('click', () => saveText(item.transcript, 'video-' + new URL(item.url).searchParams.get('v') + '.txt'));
+      share.addEventListener('click', () => shareText(item.url + '\n\n' + item.text));
       copy.addEventListener('click', () => copyText(item.url + '\n\n' + item.text));
       setBatchState(item, 'waiting', '待機中'); return item;
     }
@@ -1024,7 +1038,7 @@
           if (!item.transcript && mode === 'transcript') { item.transcript = item.text; item.save.disabled = false; persistOriginal(item.url, item.text); }
           item.body.textContent = item.text;
           item.label.textContent = (mode === 'summary' ? '要約' : mode === 'prompt' ? '要約用プロンプト' : '全文') + '（' + item.text.length.toLocaleString() + '文字）';
-          item.output.hidden = false; item.output.open = true; item.copy.disabled = false;
+          item.output.hidden = false; item.output.open = true; item.copy.disabled = false; item.share.disabled = false;
           setBatchState(item, 'done', '完了');
         } catch (error) {
           item.error.textContent = error.message || '通信に失敗しました。'; item.error.hidden = false;
