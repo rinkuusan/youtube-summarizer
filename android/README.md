@@ -1,0 +1,39 @@
+# 動画ノート Android 1.1.0
+
+YouTube Summarizerの複数URL版を内蔵した、Android 8以降向けアプリです。
+
+## 使い方
+1. YouTubeなどで動画URLをコピー。
+2. 「動画ノート」を開くとURL欄へ自動追加。Generateで処理を開始。
+3. YouTubeの「共有」→「動画ノート」でも追加できます。
+4. 1行に1URL、最大20本。重複はまとめます。既存URLは上書きしません。
+5. 同じURLをもう一度取り込みたい場合は「コピーしたURLを追加」を押します。
+
+Androidの制限により、バックグラウンドでコピー履歴を蓄積する動作はありません。
+アプリに戻る前に別々のURLを何本もコピーすると、取得できるのは最後のコピー内容のみです。
+複数本を集める際は共有で1本ずつ渡すか、複数URLをまとめてコピーしてください。
+クリップボードのうちYouTubeの動画URLだけを入力欄へ取り込み、自動送信はしません。
+Androidによるクリップボードアクセス通知が表示されることがあります。
+
+## 元アプリとの互換性
+- 全文、要約用プロンプト、Auto/JP/EN、音声ファイル選択を維持。
+- 「要約」はGroqで実際に生成します。「要約用指示文」は全文に指示を添える従来機能です。
+- 処理先: https://youtube-summarizer-of5v.onrender.com
+- 画面はAPK同梱、文字起こしはオンライン。サーバー停止時・動画側制限時は処理できません。
+- APIキーはWebViewのローカル保存領域に保存され、必要な処理時に既存サーバーへ送られます。
+- URL入力欄と取得済みの全文は端末内に保存。「保存済みの全文」から再度TXT保存できます。要約結果は終了前にコピーしてください。
+- Androidの省電力制限でバックグラウンド通信が中断される場合があります。処理中は画面を開いてください。
+
+## ビルド
+JDK 17、Android Platform 35、Build Tools 35.0.0を使用。Gradleと外部Androidライブラリは不要です。javacがない場合はJRE 17とEclipse ECJ 3.37.0（ECJ_JAR）でもビルドできます。
+`ANDROID_PLATFORM_JAR`、`ANDROID_BUILD_TOOLS`、`APK_KEYSTORE`、`APK_KEY_PASSWORD`を設定して `bash build.sh` を実行。
+署名鍵のaliasは `video-notes`。鍵はソースには含めず、別の署名バックアップに保存しています。
+今後の更新にも同じ鍵を使ってください。
+
+Windowsでは `build.ps1` を使います。`APK_KEYSTORE` と `APK_KEY_PASSWORD` は環境変数として指定し、ソースやコマンド引数には秘密値を保存しません。既定はAndroid Studio付属JDK、SDK Build Tools 35.0.0、Platform35です。versionCodeは2に更新済み。ビルド出力は `out/video-notes-1.1.0.apk` です。
+
+全文TXT保存はAndroidの「名前を付けて保存」画面で保存先を選びます。外部ストレージの広範な権限は要求しません。
+
+## 検証範囲
+Javaコンパイル、APK署名・アーカイブ構造、URL抽出、共有テキスト、重複除外、JSの複数処理と自動追加を確認。
+Android実機へのインストール・共有メニュー・クリップボード動作は未確認です。

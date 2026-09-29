@@ -108,8 +108,8 @@ async def process(req: ProcessRequest):
     {"type": "result",  "text": "..."}
     {"type": "error",   "message": "..."}
     """
-    if req.mode not in ("transcript", "prompt"):
-        raise HTTPException(status_code=400, detail="mode must be 'transcript' or 'prompt'")
+    if req.mode not in ("transcript", "prompt", "summary"):
+        raise HTTPException(status_code=400, detail="mode must be 'transcript', 'prompt' or 'summary'")
     if req.language not in ("ja", "en", "auto"):
         raise HTTPException(status_code=400, detail="language must be 'ja', 'en', or 'auto'")
 
@@ -149,12 +149,14 @@ async def process(req: ProcessRequest):
             )
             progress_cb(90)
 
-            # --- Step 2: Process with Claude ---
+            queue.put_nowait({"type": "transcript", "text": transcript_text})
+
+            # --- Step 2: Format or actually summarize ---
             from summarizer import process_transcript
 
             logger.info(f"/process: starting process_transcript (mode={req.mode}, chars={len(transcript_text):,})")
             result = await asyncio.to_thread(
-                process_transcript, transcript_text, req.mode, req.language, status_cb
+                process_transcript, transcript_text, req.mode, req.language, status_cb, req.groq_api_key
             )
 
             logger.info(f"/process: process_transcript returned ({len(result):,} chars)")
@@ -268,8 +270,8 @@ async def process_file(
     SSE-streaming endpoint for uploaded audio files.
     Accepts multipart/form-data: file + mode + language.
     """
-    if mode not in ("transcript", "prompt"):
-        raise HTTPException(status_code=400, detail="mode must be 'transcript' or 'prompt'")
+    if mode not in ("transcript", "prompt", "summary"):
+        raise HTTPException(status_code=400, detail="mode must be 'transcript', 'prompt' or 'summary'")
     if language not in ("ja", "en", "auto"):
         raise HTTPException(status_code=400, detail="language must be 'ja', 'en', or 'auto'")
 
@@ -325,7 +327,8 @@ async def process_file(
                 )
                 loop.call_soon_threadsafe(queue.put_nowait, {"type": "progress", "value": 90})
 
-                result = process_transcript(text, mode, language, status_cb)
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "transcript", "text": text})
+                result = process_transcript(text, mode, language, status_cb, groq_api_key)
                 logger.info(f"[THREAD] processing done: {len(result):,} chars")
                 return result
 
@@ -350,4 +353,4 @@ async def process_file(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": "1.1.0", "modes": ["transcript", "prompt", "summary"]}
