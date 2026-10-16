@@ -9,3 +9,6 @@ android/out/
 *.jks
 *.keystore
 .pytest_cache/
+
+*rokuon*.txt
+digest*.json
