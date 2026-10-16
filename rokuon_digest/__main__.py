@@ -8,7 +8,7 @@ import sys
 from .clean import clean_day
 from .parse import parse_log
 from .rhythm import hist30, jun_active, notify_windows
-from .summarize_day import summarize_day
+from .summarize_day import needs_key, summarize_day
 
 
 def main(argv=None) -> int:
@@ -21,8 +21,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     key = args.api_key.strip() or os.environ.get("GROQ_API_KEY", "").strip()
-    if not key and not args.no_llm:
-        print("エラー: GROQ_API_KEY（または --api-key）が必要です。LLMなしなら --no-llm を指定してください。",
+    if not key and not args.no_llm and needs_key():
+        print("エラー: GROQ_API_KEY（または --api-key）が必要です（ローカルLLMなら LLM_BASE_URL を設定）。LLMなしなら --no-llm を指定してください。",
               file=sys.stderr)
         return 2
     with open(args.log, encoding="utf-8") as f:

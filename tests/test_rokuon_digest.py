@@ -132,3 +132,24 @@ def test_cli_no_llm(tmp_path, monkeypatch, capsys):
     assert "2026-10-14" in capsys.readouterr().err
     assert cli.main([str(src), "-o", str(out), "--no-llm", "--days", "1"]) == 0
     assert len(json.loads(out.read_text(encoding="utf-8"))["days"]) == 1
+
+
+def test_custom_base_url_needs_no_key(monkeypatch, tmp_path):
+    day = clean_day([b for b in blocks() if b.date == "2026-10-14"])
+    seen = {}
+
+    def post(self, url, **kw):
+        seen["url"], seen["headers"] = url, kw["headers"]
+        return reply(json.dumps(GOOD, ensure_ascii=False))
+    monkeypatch.setattr(httpx.Client, "post", post)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1/")
+    assert summarize_day(day, "") == GOOD
+    assert seen["url"] == "http://localhost:11434/v1/chat/completions"
+    assert seen["headers"] == {"Authorization": "Bearer ollama"}
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    src, out = tmp_path / "x_rokuon.txt", tmp_path / "digest.json"
+    src.write_text(LOG, encoding="utf-8")
+    assert cli.main([str(src), "-o", str(out)]) == 0   # no key required
+    monkeypatch.delenv("LLM_BASE_URL")
+    with pytest.raises(ValueError, match="Groq"):
+        summarize_day(day, "")

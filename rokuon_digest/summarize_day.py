@@ -8,6 +8,7 @@ import httpx
 import summarizer
 
 CHUNK = 12000
+GROQ_BASE = "https://api.groq.com/openai/v1"
 KEYS = ("jun_did", "jun_mood", "with_ayaka", "topics", "uncertain")
 
 SYSTEM = (
@@ -61,6 +62,14 @@ def parse_json(content: str) -> dict:
     return out
 
 
+def base_url() -> str:
+    return (os.environ.get("LLM_BASE_URL", "").strip() or GROQ_BASE).rstrip("/")
+
+
+def needs_key() -> bool:
+    return base_url() == GROQ_BASE
+
+
 def _complete(system: str, text: str, key: str, model: str) -> dict:
     try:
         base = {"model": model, "temperature": 0.2, "max_tokens": 2000,
@@ -71,8 +80,9 @@ def _complete(system: str, text: str, key: str, model: str) -> dict:
         with httpx.Client(timeout=120) as client:
             for body in bodies:
                 response = client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": "Bearer " + key},
+                    base_url() + "/chat/completions",
+                    # Local servers such as Ollama ignore the key, but clients send one.
+                    headers={"Authorization": "Bearer " + (key or "ollama")},
                     json=body,
                 )
                 if response.status_code != 400:
@@ -94,7 +104,7 @@ def _complete(system: str, text: str, key: str, model: str) -> dict:
 
 def summarize_day(day, api_key: str) -> dict:
     key = (api_key or "").strip()
-    if not key:
+    if not key and needs_key():
         raise ValueError("要約にはGroq APIキーが必要です。")
     model = os.environ.get("SUMMARY_MODEL", "llama-3.3-70b-versatile")
     text = render_day(day)

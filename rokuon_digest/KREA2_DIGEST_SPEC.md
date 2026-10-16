@@ -9,6 +9,10 @@ PC側（Krea2Bridge: C# .NET の HTTP サーバー。Android チャットアプ�
 生成: `python -m rokuon_digest LOG.txt -o digest.json [--no-llm] [--days N]`
 （要約には環境変数 `GROQ_API_KEY` または `--api-key`。`--no-llm` なら summary は null）
 
+完全ローカルで要約する場合（Ollama の OpenAI 互換API。キー不要）:
+`LLM_BASE_URL=http://localhost:11434/v1 SUMMARY_MODEL=<ollamaのモデル名> python -m rokuon_digest LOG.txt -o digest.json`
+（`LLM_BASE_URL` 未設定なら Groq。Groq 以外の URL ではキーなしで動く）
+
 ## フィールド
 ```json
 {"generated_at": "ISO8601", "source": "元ファイル名",
